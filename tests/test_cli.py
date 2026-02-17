@@ -150,8 +150,8 @@ class TestCLI(unittest.TestCase):
 
         assert restored_content == "test_config=value\n"
 
-    def test_backup_and_restore_full_workflow(self):
-        """Test complete backup and restore workflow."""
+    def test_restore_skips_when_local_is_newer(self):
+        """Test restore keeps local file when local mtime is newer."""
         original_content = "test_config=value\n"
 
         # Verify original file exists and has correct content
@@ -176,8 +176,36 @@ class TestCLI(unittest.TestCase):
         with open(self.test_file_path) as f:
             assert f.read() == modified_content
 
-        # Step 3: Restore (should replace modified file with backup)
+        # Step 3: Restore without force (should keep modified local file)
+        utils.FORCE_YES = False
         with patch("sys.argv", ["mackup", "restore"]):
+            main()
+
+        # Verify file is still local modified content
+        with open(self.test_file_path) as f:
+            assert f.read() == modified_content
+
+        # Cleanup flag for remaining tests
+        utils.FORCE_YES = True
+
+    def test_restore_force_overwrites_when_local_is_newer(self):
+        """Test restore --force replaces local file even if local mtime is newer."""
+        original_content = "test_config=value\n"
+
+        # Step 1: Backup
+        with patch("sys.argv", ["mackup", "backup"]):
+            main()
+
+        # Step 2: Modify original file (now newer than backup)
+        modified_content = "test_config=modified\n"
+        with open(self.test_file_path, "w") as f:
+            f.write(modified_content)
+
+        with open(self.test_file_path) as f:
+            assert f.read() == modified_content
+
+        # Step 3: Force restore (must overwrite local file)
+        with patch("sys.argv", ["mackup", "--force", "restore"]):
             main()
 
         # Verify file was restored to original content

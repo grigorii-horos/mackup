@@ -99,9 +99,11 @@ class ApplicationProfile:
                             continue
 
                 if self.verbose:
-                    print(f"Copying\n  {home_filepath}\n  to\n  {mackup_filepath} ...")
+                    print(
+                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
+                    )
                 else:
-                    print(f"Copying {filename} ...")
+                    print(f"Backing up {filename} ...")
 
                 if self.dry_run:
                     continue
@@ -118,13 +120,6 @@ class ApplicationProfile:
                         f"Error: Unable to copy file from {home_filepath} to "
                         f"{mackup_filepath} due to permission issue: {e}",
                     )
-                else:
-                    if self.verbose:
-                        print(
-                            f"Copied\n  {home_filepath}\n  to\n  {mackup_filepath}",
-                        )
-                    else:
-                        print(f"Copied {filename}")
 
     def copy_files_from_mackup_folder(self) -> None:
         """
@@ -133,10 +128,10 @@ class ApplicationProfile:
         Algorithm:
             for config_file
                 if config_file exists in mackup and is a real file/folder
-                    if exists home/file
-                        are you sure?
-                        if sure
-                            rm home/file
+                    if exists home/file and mtime(home) >= mtime(mackup)
+                        skip
+                    if exists home/file and --force
+                        rm home/file
                     cp mackup/file home/file
         """
         for filename in self.files:
@@ -144,37 +139,34 @@ class ApplicationProfile:
 
             # If config_file exists in mackup and is a real file/folder
             if (os.path.isfile(mackup_filepath) or os.path.isdir(mackup_filepath)):
+                # If local file is newer (or same age), keep local version by default.
+                if (
+                    os.path.exists(home_filepath)
+                    and not utils.FORCE_YES
+                    and os.path.getmtime(home_filepath) >= os.path.getmtime(mackup_filepath)
+                ):
+                    if self.verbose:
+                        print(
+                            f"Skipping {home_filepath}\n"
+                            f"  local file is newer or same age than\n  {mackup_filepath}",
+                        )
+                    else:
+                        print(f"Skipping {filename}")
+                    continue
+
                 if self.verbose:
                     print(
-                        f"Recovering\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
+                        f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
                     )
                 else:
-                    print(f"Recovering {filename} ...")
+                    print(f"Restoring {filename} ...")
 
                 if self.dry_run:
                     continue
 
-                # If exists home/file
+                # If exists home/file, overwrite it.
                 if os.path.lexists(home_filepath):
-                    # Name it right
-                    if os.path.isfile(home_filepath):
-                        file_type = "file"
-                    elif os.path.isdir(home_filepath):
-                        file_type = "folder"
-                    elif os.path.islink(home_filepath):
-                        file_type = "link"
-                    else:
-                        raise ValueError(f"Unsupported file: {home_filepath}")
-                    # Ask the user if he really wants to replace it
-                    if utils.confirm(
-                        f"A {file_type} named {home_filepath} already exists in your"
-                        " home folder.\nAre you sure that you want to"
-                        " replace it?",
-                    ):
-                        # If confirmed, delete the existing home file
-                        utils.delete(home_filepath)
-                    else:
-                        continue
+                    utils.delete(home_filepath)
 
                 # Copy the file
                 try:

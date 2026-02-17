@@ -130,7 +130,7 @@ class TestApplicationProfile(unittest.TestCase):
 
             # Verify that the verbose copy message and error message were printed
             output = captured_output.getvalue()
-            assert "Copying" in output
+            assert "Backing up" in output
             assert "Error: Unable to copy file" in output
             assert "permission issue" in output
 
@@ -204,7 +204,7 @@ class TestApplicationProfile(unittest.TestCase):
 
             # Verify that the verbose recovering message and error message were printed
             output = captured_output.getvalue()
-            assert "Recovering" in output
+            assert "Restoring" in output
             assert "Error: Unable to copy file" in output
             assert "permission issue" in output
 
@@ -311,7 +311,7 @@ class TestApplicationProfile(unittest.TestCase):
 
             # Verify that the copy message was printed
             output = captured_output.getvalue()
-            assert "Copying" in output
+            assert "Backing up" in output
 
     def test_copy_files_from_mackup_folder_dry_run_no_permission_error(self):
         """Test dry_run mode doesn't trigger PermissionError in restore."""
@@ -348,7 +348,7 @@ class TestApplicationProfile(unittest.TestCase):
 
             # Verify that the recovering message was printed
             output = captured_output.getvalue()
-            assert "Recovering" in output
+            assert "Restoring" in output
 
     def test_copy_files_to_mackup_folder_decline_replace_skips_copy(self):
         """Test backup does not overwrite when user declines replacement."""
@@ -372,8 +372,8 @@ class TestApplicationProfile(unittest.TestCase):
         with open(mackup_filepath) as f:
             assert f.read() == "existing backup"
 
-    def test_copy_files_from_mackup_folder_decline_replace_skips_copy(self):
-        """Test restore does not overwrite when user declines replacement."""
+    def test_copy_files_from_mackup_folder_skips_when_home_is_newer(self):
+        """Test restore does not overwrite when local file is newer."""
         test_file = ".testfile"
         home_filepath = os.path.join(self.temp_home, test_file)
         mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
@@ -383,8 +383,10 @@ class TestApplicationProfile(unittest.TestCase):
         with open(mackup_filepath, "w") as f:
             f.write("backup content")
 
-        with patch("mackup.application.utils.confirm", return_value=False), \
-             patch("mackup.application.utils.delete") as mock_delete, \
+        os.utime(home_filepath, (200, 200))
+        os.utime(mackup_filepath, (100, 100))
+
+        with patch("mackup.application.utils.delete") as mock_delete, \
              patch("mackup.application.utils.copy") as mock_copy:
             self.app_profile.copy_files_from_mackup_folder()
 
@@ -393,6 +395,28 @@ class TestApplicationProfile(unittest.TestCase):
 
         with open(home_filepath) as f:
             assert f.read() == "existing home"
+
+    def test_copy_files_from_mackup_folder_force_overwrites_newer_home(self):
+        """Test FORCE_YES restores even when local file is newer."""
+        test_file = ".testfile"
+        home_filepath = os.path.join(self.temp_home, test_file)
+        mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
+
+        with open(home_filepath, "w") as f:
+            f.write("existing home")
+        with open(mackup_filepath, "w") as f:
+            f.write("backup content")
+
+        os.utime(home_filepath, (200, 200))
+        os.utime(mackup_filepath, (100, 100))
+
+        with patch("mackup.application.utils.FORCE_YES", True), \
+             patch("mackup.application.utils.delete") as mock_delete, \
+             patch("mackup.application.utils.copy") as mock_copy:
+            self.app_profile.copy_files_from_mackup_folder()
+
+            mock_delete.assert_called_once_with(home_filepath)
+            mock_copy.assert_called_once_with(mackup_filepath, home_filepath)
 
     def test_link_uninstall_mackup_not_a_link(self):
         """Test link_uninstall skips when home file is not a symbolic link."""
@@ -649,7 +673,7 @@ class TestApplicationProfile(unittest.TestCase):
 
             # Verify that the copy message was printed
             output = captured_output.getvalue()
-            assert "Copying" in output
+            assert "Backing up" in output
 
     def test_copy_files_to_mackup_folder_skips_when_backup_is_newer(self):
         """Test backup skips overwrite when existing backup is newer."""
