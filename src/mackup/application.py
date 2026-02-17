@@ -79,40 +79,36 @@ class ApplicationProfile:
                             f"Skipping {home_filepath}\n"
                             f"  already linked to\n  {mackup_filepath}",
                         )
-                    continue
-
-                if self.verbose:
-                    print(
-                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
-                    )
-                else:
-                    print(f"Backing up {filename} ...")
-
-                if self.dry_run:
+                    else:
+                        print(f"Skipping {filename} (already linked)")
                     continue
 
                 # If exists mackup/file
                 if os.path.lexists(mackup_filepath):
-                    # Name it right
-                    file_type: str
-                    if os.path.isfile(mackup_filepath):
-                        file_type = "file"
-                    elif os.path.isdir(mackup_filepath):
-                        file_type = "folder"
-                    elif os.path.islink(mackup_filepath):
-                        file_type = "link"
-                    else:
-                        raise ValueError(f"Unsupported file: {mackup_filepath}")
-                    # Ask the user if he really wants to replace it
-                    if utils.confirm(
-                        f"A {file_type} named {mackup_filepath} already exists in the"
-                        " Mackup folder.\nAre you sure that you want to"
-                        " replace it? (use --force to skip this prompt)",
-                    ):
-                        # If confirmed, delete the file in Mackup
-                        utils.delete(mackup_filepath)
-                    else:
-                        continue
+                    if os.path.exists(mackup_filepath):
+                        source_mtime = os.path.getmtime(home_filepath)
+                        backup_mtime = os.path.getmtime(mackup_filepath)
+                        if source_mtime <= backup_mtime:
+                            if self.verbose:
+                                print(
+                                    f"Skipping {home_filepath}\n"
+                                    f"  backup is newer or same age at\n  {mackup_filepath}",
+                                )
+                            else:
+                                print(f"Skipping {filename}")
+                            continue
+
+                if self.verbose:
+                    print(f"Copying\n  {home_filepath}\n  to\n  {mackup_filepath} ...")
+                else:
+                    print(f"Copying {filename} ...")
+
+                if self.dry_run:
+                    continue
+
+                if os.path.lexists(mackup_filepath):
+                    # Local file is newer (or backup is broken link), overwrite silently.
+                    utils.delete(mackup_filepath)
 
                 # Copy the file
                 try:
@@ -122,6 +118,13 @@ class ApplicationProfile:
                         f"Error: Unable to copy file from {home_filepath} to "
                         f"{mackup_filepath} due to permission issue: {e}",
                     )
+                else:
+                    if self.verbose:
+                        print(
+                            f"Copied\n  {home_filepath}\n  to\n  {mackup_filepath}",
+                        )
+                    else:
+                        print(f"Copied {filename}")
 
     def copy_files_from_mackup_folder(self) -> None:
         """

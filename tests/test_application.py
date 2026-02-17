@@ -128,9 +128,9 @@ class TestApplicationProfile(unittest.TestCase):
             # Verify that copy was called
             mock_copy.assert_called_once()
 
-            # Verify that the verbose backing up message and error message were printed
+            # Verify that the verbose copy message and error message were printed
             output = captured_output.getvalue()
-            assert "Backing up" in output
+            assert "Copying" in output
             assert "Error: Unable to copy file" in output
             assert "permission issue" in output
 
@@ -309,9 +309,9 @@ class TestApplicationProfile(unittest.TestCase):
             # Verify that copy was NOT called (dry_run mode)
             mock_copy.assert_not_called()
 
-            # Verify that the backing up message was printed
+            # Verify that the copy message was printed
             output = captured_output.getvalue()
-            assert "Backing up" in output
+            assert "Copying" in output
 
     def test_copy_files_from_mackup_folder_dry_run_no_permission_error(self):
         """Test dry_run mode doesn't trigger PermissionError in restore."""
@@ -546,9 +546,9 @@ class TestApplicationProfile(unittest.TestCase):
             mock_delete.assert_not_called()
             mock_copy.assert_not_called()
 
-            # Verify that the skipping message was NOT printed (non-verbose)
+            # Verify that the operation is reported as skipped (non-verbose)
             output = captured_output.getvalue()
-            assert "Backing up" not in output
+            assert "Skipping" in output
 
         # Verify the symlink still exists and points to mackup file
         assert os.path.islink(home_filepath)
@@ -647,9 +647,71 @@ class TestApplicationProfile(unittest.TestCase):
             # Verify that copy WAS called (should backup symlinks to other locations)
             mock_copy.assert_called_once_with(home_filepath, mackup_filepath)
 
-            # Verify that the backing up message was printed
+            # Verify that the copy message was printed
             output = captured_output.getvalue()
-            assert "Backing up" in output
+            assert "Copying" in output
+
+    def test_copy_files_to_mackup_folder_skips_when_backup_is_newer(self):
+        """Test backup skips overwrite when existing backup is newer."""
+        test_file = ".testfile"
+        home_filepath = os.path.join(self.temp_home, test_file)
+        mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
+
+        with open(home_filepath, "w") as f:
+            f.write("home content")
+        with open(mackup_filepath, "w") as f:
+            f.write("backup content")
+
+        os.utime(home_filepath, (100, 100))
+        os.utime(mackup_filepath, (200, 200))
+
+        with patch("mackup.application.utils.copy") as mock_copy, \
+             patch("mackup.application.utils.delete") as mock_delete:
+            self.app_profile.copy_files_to_mackup_folder()
+            mock_copy.assert_not_called()
+            mock_delete.assert_not_called()
+
+    def test_copy_files_to_mackup_folder_overwrites_when_home_is_newer(self):
+        """Test backup overwrites when local file is newer than backup."""
+        test_file = ".testfile"
+        home_filepath = os.path.join(self.temp_home, test_file)
+        mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
+
+        with open(home_filepath, "w") as f:
+            f.write("home content")
+        with open(mackup_filepath, "w") as f:
+            f.write("backup content")
+
+        os.utime(home_filepath, (200, 200))
+        os.utime(mackup_filepath, (100, 100))
+
+        with patch("mackup.application.utils.copy") as mock_copy, \
+             patch("mackup.application.utils.delete") as mock_delete:
+            self.app_profile.copy_files_to_mackup_folder()
+            mock_delete.assert_called_once_with(mackup_filepath)
+            mock_copy.assert_called_once_with(home_filepath, mackup_filepath)
+
+    def test_copy_files_to_mackup_folder_overwrites_without_prompt(self):
+        """Test backup overwrites newer local file without confirmation prompt."""
+        test_file = ".testfile"
+        home_filepath = os.path.join(self.temp_home, test_file)
+        mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
+
+        with open(home_filepath, "w") as f:
+            f.write("home content")
+        with open(mackup_filepath, "w") as f:
+            f.write("backup content")
+
+        os.utime(home_filepath, (200, 200))
+        os.utime(mackup_filepath, (100, 100))
+
+        with patch("mackup.application.utils.confirm") as mock_confirm, \
+             patch("mackup.application.utils.copy") as mock_copy, \
+             patch("mackup.application.utils.delete") as mock_delete:
+            self.app_profile.copy_files_to_mackup_folder()
+            mock_confirm.assert_not_called()
+            mock_delete.assert_called_once_with(mackup_filepath)
+            mock_copy.assert_called_once_with(home_filepath, mackup_filepath)
 
 
 if __name__ == "__main__":

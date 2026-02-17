@@ -436,3 +436,29 @@ class TestMackup(unittest.TestCase):
             # Try to use the library path on Linux, which shouldn't work
             path = os.path.join(os.environ["HOME"], "Library/")
             assert not utils.can_file_be_synced_on_current_platform(path)
+
+            # Try to use the AppData path on Linux, which shouldn't work
+            path = os.path.join(os.environ["HOME"], "AppData/")
+            assert not utils.can_file_be_synced_on_current_platform(path)
+
+        # Force the Windows test using mock
+        with patch.object(
+            utils.platform, "system", return_value=utils.constants.PLATFORM_WINDOWS
+        ):
+            path = "some/file"
+            assert utils.can_file_be_synced_on_current_platform(path)
+
+            # Try to use the Library path on Windows, which shouldn't work
+            path = os.path.join(os.environ["HOME"], "Library/")
+            assert not utils.can_file_be_synced_on_current_platform(path)
+
+            # AppData should be syncable on Windows
+            path = os.path.join(os.environ["HOME"], "AppData/")
+            assert utils.can_file_be_synced_on_current_platform(path)
+
+        # AppData should not be syncable on macOS
+        with patch.object(
+            utils.platform, "system", return_value=utils.constants.PLATFORM_DARWIN
+        ):
+            path = os.path.join(os.environ["HOME"], "AppData/")
+            assert not utils.can_file_be_synced_on_current_platform(path)

@@ -362,7 +362,9 @@ def can_file_be_synced_on_current_platform(path: str) -> bool:
 
     Check if it makes sense to sync the file at the given path on the current
     platform.
-    For now we don't sync any file in the ~/Library folder on GNU/Linux.
+    For now we don't sync:
+    - any file in ~/Library on GNU/Linux and Windows
+    - any file in ~/AppData on GNU/Linux and macOS
     There might be other exceptions in the future.
 
     Args:
@@ -384,8 +386,20 @@ def can_file_be_synced_on_current_platform(path: str) -> bool:
     # not any file/folder named LibrarySomething
     library_path: str = os.path.join(os.environ["HOME"], "Library/")
 
-    is_linux = platform.system() == constants.PLATFORM_LINUX
-    if is_linux and fullpath.startswith(library_path):
+    system_name = platform.system()
+    if system_name in (constants.PLATFORM_LINUX, constants.PLATFORM_WINDOWS) and (
+        fullpath.startswith(library_path)
+    ):
+        can_be_synced = False
+
+    # Compute the ~/AppData path on Windows
+    # End it with a slash because we are looking for this specific folder and
+    # not any file/folder named AppDataSomething
+    appdata_path: str = os.path.join(os.environ["HOME"], "AppData/")
+
+    if system_name in (constants.PLATFORM_LINUX, constants.PLATFORM_DARWIN) and (
+        fullpath.startswith(appdata_path)
+    ):
         can_be_synced = False
 
     return can_be_synced

@@ -5,6 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 # Support platforms
 PLATFORM_DARWIN: str = "Darwin"
 PLATFORM_LINUX: str = "Linux"
+PLATFORM_WINDOWS: str = "Windows"
 
 # Directory containing the application configs
 APPS_DIR: str = "applications"
