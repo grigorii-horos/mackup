@@ -8,6 +8,7 @@ Usage:
   mackup [options] show <application>
   mackup [options] backup
   mackup [options] restore
+  mackup [options] sync
   mackup [options] link install
   mackup [options] link
   mackup [options] link uninstall
@@ -28,6 +29,7 @@ Modes of action:
  - mackup show: display the details for a supported application.
  - mackup backup: copy local config files in the configured remote folder.
  - mackup restore: copy config files from the configured remote folder locally.
+ - mackup sync: synchronize local and remote config files in both directions.
  - mackup link install: moves local config files in remote folder, and links.
  - mackup link: links local config files from the remote folder.
  - mackup link uninstall: removes the links and copy config files locally.
@@ -156,6 +158,17 @@ def main() -> None:
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
             print_app_header(app_name)
             app.copy_files_from_mackup_folder()
+
+    # mackup sync
+    elif args["sync"]:
+        mckp.check_for_usable_backup_env()
+
+        # Synchronize in two phases:
+        # one pass per file: decide direction by mtime and do one action.
+        for app_name in sorted(mckp.get_apps_to_backup()):
+            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            print_app_header(app_name)
+            app.sync_files()
 
     # mackup link install
     elif args["link"] and args["install"]:

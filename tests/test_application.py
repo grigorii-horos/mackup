@@ -737,6 +737,31 @@ class TestApplicationProfile(unittest.TestCase):
             mock_delete.assert_called_once_with(mackup_filepath)
             mock_copy.assert_called_once_with(home_filepath, mackup_filepath)
 
+    def test_sync_files_logs_single_action_per_file(self):
+        """Test sync emits one action line per file (no backup+restore double log)."""
+        test_file = ".testfile"
+        home_filepath = os.path.join(self.temp_home, test_file)
+        mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
+
+        with open(home_filepath, "w") as f:
+            f.write("home content")
+        with open(mackup_filepath, "w") as f:
+            f.write("backup content")
+
+        os.utime(home_filepath, (200, 200))
+        os.utime(mackup_filepath, (100, 100))
+
+        captured_output = StringIO()
+        sys.stdout = captured_output
+        try:
+            self.app_profile.sync_files()
+        finally:
+            sys.stdout = sys.__stdout__
+
+        output = captured_output.getvalue()
+        assert "Backing up .testfile ..." in output
+        assert "Restoring .testfile ..." not in output
+
 
 if __name__ == "__main__":
     unittest.main()

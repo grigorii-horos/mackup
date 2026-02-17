@@ -212,6 +212,52 @@ class TestCLI(unittest.TestCase):
         with open(self.test_file_path) as f:
             assert f.read() == original_content
 
+    def test_sync_updates_local_when_backup_is_newer(self):
+        """Test sync restores local file when backup is newer."""
+        # Create initial backup
+        with patch("sys.argv", ["mackup", "backup"]):
+            main()
+
+        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
+        assert os.path.exists(backed_up_file)
+
+        # Make backup newer and different
+        with open(backed_up_file, "w") as f:
+            f.write("backup_newer_value\n")
+        os.utime(backed_up_file, None)
+
+        # Ensure local file is older
+        os.utime(self.test_file_path, (100, 100))
+
+        with patch("sys.argv", ["mackup", "sync"]):
+            main()
+
+        with open(self.test_file_path) as f:
+            assert f.read() == "backup_newer_value\n"
+
+    def test_sync_updates_backup_when_local_is_newer(self):
+        """Test sync backs up local file when local file is newer."""
+        # Create initial backup
+        with patch("sys.argv", ["mackup", "backup"]):
+            main()
+
+        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
+        assert os.path.exists(backed_up_file)
+
+        # Make local newer and different
+        with open(self.test_file_path, "w") as f:
+            f.write("local_newer_value\n")
+        os.utime(self.test_file_path, None)
+
+        # Ensure backup file is older
+        os.utime(backed_up_file, (100, 100))
+
+        with patch("sys.argv", ["mackup", "sync"]):
+            main()
+
+        with open(backed_up_file) as f:
+            assert f.read() == "local_newer_value\n"
+
     def test_backup_preserves_file_permissions(self):
         """Test that mackup backup preserves file permissions."""
         # Set specific permissions on test file

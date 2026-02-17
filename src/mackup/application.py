@@ -177,6 +177,93 @@ class ApplicationProfile:
                         f"{home_filepath} due to permission issue: {e}",
                     )
 
+    def sync_files(self) -> None:
+        """Synchronize files between home and Mackup using mtime."""
+        for filename in self.files:
+            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+
+            home_exists = os.path.isfile(home_filepath) or os.path.isdir(home_filepath)
+            backup_exists = os.path.isfile(mackup_filepath) or os.path.isdir(
+                mackup_filepath
+            )
+
+            action: str | None = None
+            if home_exists and backup_exists:
+                # Already linked/same inode, nothing to do.
+                if os.path.samefile(home_filepath, mackup_filepath):
+                    if self.verbose:
+                        print(
+                            f"Skipping {home_filepath}\n"
+                            f"  already linked to\n  {mackup_filepath}",
+                        )
+                    else:
+                        print(f"Skipping {filename}")
+                    continue
+
+                home_mtime = os.path.getmtime(home_filepath)
+                backup_mtime = os.path.getmtime(mackup_filepath)
+                if home_mtime > backup_mtime:
+                    action = "backup"
+                elif backup_mtime > home_mtime:
+                    action = "restore"
+            elif home_exists:
+                action = "backup"
+            elif backup_exists:
+                action = "restore"
+
+            if action is None:
+                if self.verbose:
+                    print(
+                        f"Skipping {home_filepath}\n"
+                        f"  same mtime as\n  {mackup_filepath}",
+                    )
+                else:
+                    print(f"Skipping {filename}")
+                continue
+
+            if action == "backup":
+                if self.verbose:
+                    print(
+                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
+                    )
+                else:
+                    print(f"Backing up {filename} ...")
+
+                if self.dry_run:
+                    continue
+
+                if os.path.lexists(mackup_filepath):
+                    utils.delete(mackup_filepath)
+
+                try:
+                    utils.copy(home_filepath, mackup_filepath)
+                except PermissionError as e:
+                    print(
+                        f"Error: Unable to copy file from {home_filepath} to "
+                        f"{mackup_filepath} due to permission issue: {e}",
+                    )
+            else:
+                if self.verbose:
+                    print(
+                        f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
+                    )
+                else:
+                    print(f"Restoring {filename} ...")
+
+                if self.dry_run:
+                    continue
+
+                if os.path.lexists(home_filepath):
+                    utils.delete(home_filepath)
+
+                try:
+                    utils.copy(mackup_filepath, home_filepath)
+                except PermissionError as e:
+                    print(
+                        f"Error: Unable to copy file from {mackup_filepath} to "
+                        f"{home_filepath} due to permission issue: {e}",
+                    )
+
     def link_install(self) -> None:
         """
         Create the application config file links.
