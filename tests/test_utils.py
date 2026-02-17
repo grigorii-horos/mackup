@@ -102,6 +102,30 @@ class TestMackup(unittest.TestCase):
         # Let's clean up
         utils.delete(dstpath)
 
+    def test_copy_file_preserves_mtime(self):
+        """copy() preserves source mtime, so backup/restore mtime logic is stable."""
+        # Create a source file
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        srcfile = tfile.name
+        tfile.close()
+        with open(srcfile, "w") as f:
+            f.write("content")
+
+        # Use a fixed timestamp
+        fixed_ts = 946684800  # 2000-01-01 00:00:00 UTC
+        os.utime(srcfile, (fixed_ts, fixed_ts))
+
+        # Destination file
+        dstpath = tempfile.mkdtemp()
+        dstfile = os.path.join(dstpath, os.path.basename(srcfile))
+
+        utils.copy(srcfile, dstfile)
+
+        assert int(os.path.getmtime(dstfile)) == fixed_ts
+
+        utils.delete(srcfile)
+        utils.delete(dstpath)
+
     def test_copy_fail(self):
         # Create a tmp FIFO file
         tfile = tempfile.NamedTemporaryFile()
