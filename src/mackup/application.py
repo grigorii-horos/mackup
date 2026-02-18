@@ -86,6 +86,13 @@ class ApplicationProfile:
                 utils.delete(destination)
         utils.copy(source, destination)
 
+    @staticmethod
+    def ensure_directory(path: str, mode_from: str) -> None:
+        """Ensure directory exists and mirror mtime from mode_from."""
+        os.makedirs(path, exist_ok=True)
+        dir_mtime = os.path.getmtime(mode_from)
+        os.utime(path, (dir_mtime, dir_mtime))
+
     def sync_directory_entries_one_way(
         self, source_dir: str, destination_dir: str, source_wins: bool, dry_run: bool,
     ) -> bool:
@@ -97,6 +104,13 @@ class ApplicationProfile:
         destination back to source; useful for skip-only behavior.
         """
         changed = False
+        source_root_mtime = os.path.getmtime(source_dir)
+        destination_root_mtime = os.path.getmtime(destination_dir)
+        if source_wins and source_root_mtime > destination_root_mtime:
+            if not dry_run:
+                os.utime(destination_dir, (source_root_mtime, source_root_mtime))
+            changed = True
+
         source_entries = self.collect_relative_entries(source_dir)
         destination_entries = self.collect_relative_entries(destination_dir)
         all_entries = sorted(source_entries | destination_entries)
@@ -112,6 +126,12 @@ class ApplicationProfile:
                 destination_is_dir = os.path.isdir(destination_entry)
 
                 if source_is_dir and destination_is_dir:
+                    source_mtime = os.path.getmtime(source_entry)
+                    destination_mtime = os.path.getmtime(destination_entry)
+                    if source_wins and source_mtime > destination_mtime:
+                        if not dry_run:
+                            os.utime(destination_entry, (source_mtime, source_mtime))
+                        changed = True
                     continue
 
                 source_mtime = self.get_effective_mtime(source_entry)
@@ -119,11 +139,19 @@ class ApplicationProfile:
 
                 if source_wins and source_mtime > destination_mtime:
                     if not dry_run:
-                        self.copy_item(source_entry, destination_entry)
+                        if source_is_dir:
+                            if os.path.lexists(destination_entry) and not destination_is_dir:
+                                utils.delete(destination_entry)
+                            self.ensure_directory(destination_entry, source_entry)
+                        else:
+                            self.copy_item(source_entry, destination_entry)
                     changed = True
             elif source_exists:
                 if not dry_run:
-                    self.copy_item(source_entry, destination_entry)
+                    if os.path.isdir(source_entry):
+                        self.ensure_directory(destination_entry, source_entry)
+                    else:
+                        self.copy_item(source_entry, destination_entry)
                 changed = True
 
         return changed
@@ -132,6 +160,13 @@ class ApplicationProfile:
         """
         Synchronize two directories by comparing mtime per entry.
         """
+        home_root_mtime = os.path.getmtime(home_dir)
+        backup_root_mtime = os.path.getmtime(backup_dir)
+        if home_root_mtime > backup_root_mtime:
+            os.utime(backup_dir, (home_root_mtime, home_root_mtime))
+        elif backup_root_mtime > home_root_mtime:
+            os.utime(home_dir, (backup_root_mtime, backup_root_mtime))
+
         home_entries = self.collect_relative_entries(home_dir)
         backup_entries = self.collect_relative_entries(backup_dir)
         all_entries = sorted(home_entries | backup_entries)
@@ -147,6 +182,12 @@ class ApplicationProfile:
                 backup_is_dir = os.path.isdir(backup_entry)
 
                 if home_is_dir and backup_is_dir:
+                    home_mtime = os.path.getmtime(home_entry)
+                    backup_mtime = os.path.getmtime(backup_entry)
+                    if home_mtime > backup_mtime:
+                        os.utime(backup_entry, (home_mtime, home_mtime))
+                    elif backup_mtime > home_mtime:
+                        os.utime(home_entry, (backup_mtime, backup_mtime))
                     continue
 
                 if (not home_is_dir) and (not backup_is_dir):
@@ -161,13 +202,29 @@ class ApplicationProfile:
                 home_mtime = self.get_effective_mtime(home_entry)
                 backup_mtime = self.get_effective_mtime(backup_entry)
                 if home_mtime >= backup_mtime:
+                    if home_is_dir:
+                        if os.path.lexists(backup_entry) and not backup_is_dir:
+                            utils.delete(backup_entry)
+                        self.ensure_directory(backup_entry, home_entry)
+                    else:
+                        self.copy_item(home_entry, backup_entry)
+                else:
+                    if backup_is_dir:
+                        if os.path.lexists(home_entry) and not home_is_dir:
+                            utils.delete(home_entry)
+                        self.ensure_directory(home_entry, backup_entry)
+                    else:
+                        self.copy_item(backup_entry, home_entry)
+            elif home_exists:
+                if os.path.isdir(home_entry):
+                    self.ensure_directory(backup_entry, home_entry)
+                else:
                     self.copy_item(home_entry, backup_entry)
+            elif backup_exists:
+                if os.path.isdir(backup_entry):
+                    self.ensure_directory(home_entry, backup_entry)
                 else:
                     self.copy_item(backup_entry, home_entry)
-            elif home_exists:
-                self.copy_item(home_entry, backup_entry)
-            elif backup_exists:
-                self.copy_item(backup_entry, home_entry)
 
     def copy_files_to_mackup_folder(self) -> None:
         """

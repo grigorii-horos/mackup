@@ -863,6 +863,31 @@ class TestApplicationProfile(unittest.TestCase):
         with open(backup_backup_newer) as f:
             assert f.read() == "backup-value"
 
+    def test_copy_files_to_mackup_folder_updates_directory_mtime_without_copy(self):
+        """Backup should update only directory mtime when contents are unchanged."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_file = os.path.join(home_dirpath, "same.txt")
+        mackup_file = os.path.join(mackup_dirpath, "same.txt")
+        with open(home_file, "w") as f:
+            f.write("same")
+        with open(mackup_file, "w") as f:
+            f.write("same")
+        os.utime(home_file, (100, 100))
+        os.utime(mackup_file, (100, 100))
+        os.utime(home_dirpath, (300, 300))
+        os.utime(mackup_dirpath, (100, 100))
+
+        with patch("mackup.application.utils.copy") as mock_copy:
+            self.app_profile.copy_files_to_mackup_folder()
+            mock_copy.assert_not_called()
+
+        assert int(os.path.getmtime(mackup_dirpath)) == 300
+
     def test_sync_files_merges_directories_by_file_mtime(self):
         """Sync should merge directories entry-by-entry based on file mtimes."""
         test_dir = ".testfolder"
@@ -902,6 +927,31 @@ class TestApplicationProfile(unittest.TestCase):
             assert f.read() == "backup-value"
         with open(os.path.join(mackup_dirpath, "backup_newer.txt")) as f:
             assert f.read() == "backup-value"
+
+    def test_sync_files_updates_directory_mtime_without_copy(self):
+        """Sync should align directory mtime without copying when files are equal."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_file = os.path.join(home_dirpath, "same.txt")
+        mackup_file = os.path.join(mackup_dirpath, "same.txt")
+        with open(home_file, "w") as f:
+            f.write("same")
+        with open(mackup_file, "w") as f:
+            f.write("same")
+        os.utime(home_file, (100, 100))
+        os.utime(mackup_file, (100, 100))
+        os.utime(home_dirpath, (100, 100))
+        os.utime(mackup_dirpath, (300, 300))
+
+        with patch("mackup.application.utils.copy") as mock_copy:
+            self.app_profile.sync_files()
+            mock_copy.assert_not_called()
+
+        assert int(os.path.getmtime(home_dirpath)) == 300
 
     def test_sync_files_logs_single_action_per_file(self):
         """Test sync emits one action line per file (no backup+restore double log)."""
