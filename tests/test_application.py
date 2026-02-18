@@ -737,6 +737,172 @@ class TestApplicationProfile(unittest.TestCase):
             mock_delete.assert_called_once_with(mackup_filepath)
             mock_copy.assert_called_once_with(home_filepath, mackup_filepath)
 
+    def test_copy_files_to_mackup_folder_compares_nested_mtime_for_directories(self):
+        """Backup should use nested mtimes when comparing directories."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_nested = os.path.join(home_dirpath, "nested.txt")
+        mackup_nested = os.path.join(mackup_dirpath, "nested.txt")
+        with open(home_nested, "w") as f:
+            f.write("home")
+        with open(mackup_nested, "w") as f:
+            f.write("backup")
+
+        # Keep root directory mtimes equal; only nested file differs.
+        os.utime(home_dirpath, (100, 100))
+        os.utime(mackup_dirpath, (100, 100))
+        os.utime(home_nested, (300, 300))
+        os.utime(mackup_nested, (100, 100))
+
+        with patch("mackup.application.utils.copy") as mock_copy, \
+             patch("mackup.application.utils.delete") as mock_delete:
+            self.app_profile.copy_files_to_mackup_folder()
+            mock_delete.assert_not_called()
+            mock_copy.assert_called_once_with(home_nested, mackup_nested)
+
+    def test_copy_files_to_mackup_folder_merges_directories_by_file_mtime(self):
+        """Backup should update only backup entries that are older than local ones."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_newer = os.path.join(home_dirpath, "home_newer.txt")
+        backup_newer = os.path.join(home_dirpath, "backup_newer.txt")
+        with open(home_newer, "w") as f:
+            f.write("home-value")
+        with open(backup_newer, "w") as f:
+            f.write("home-old-value")
+
+        backup_home_newer = os.path.join(mackup_dirpath, "home_newer.txt")
+        backup_backup_newer = os.path.join(mackup_dirpath, "backup_newer.txt")
+        with open(backup_home_newer, "w") as f:
+            f.write("backup-old-value")
+        with open(backup_backup_newer, "w") as f:
+            f.write("backup-value")
+
+        os.utime(home_newer, (300, 300))
+        os.utime(backup_home_newer, (100, 100))
+        os.utime(backup_newer, (100, 100))
+        os.utime(backup_backup_newer, (300, 300))
+
+        self.app_profile.copy_files_to_mackup_folder()
+
+        with open(backup_home_newer) as f:
+            assert f.read() == "home-value"
+        with open(backup_backup_newer) as f:
+            assert f.read() == "backup-value"
+        with open(backup_newer) as f:
+            assert f.read() == "home-old-value"
+
+    def test_copy_files_from_mackup_folder_compares_nested_mtime_for_directories(self):
+        """Restore should use nested mtimes when comparing directories."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_nested = os.path.join(home_dirpath, "nested.txt")
+        mackup_nested = os.path.join(mackup_dirpath, "nested.txt")
+        with open(home_nested, "w") as f:
+            f.write("home")
+        with open(mackup_nested, "w") as f:
+            f.write("backup")
+
+        # Keep root directory mtimes equal; backup nested file is newer.
+        os.utime(home_dirpath, (100, 100))
+        os.utime(mackup_dirpath, (100, 100))
+        os.utime(home_nested, (100, 100))
+        os.utime(mackup_nested, (300, 300))
+
+        with patch("mackup.application.utils.copy") as mock_copy, \
+             patch("mackup.application.utils.delete") as mock_delete:
+            self.app_profile.copy_files_from_mackup_folder()
+            mock_delete.assert_not_called()
+            mock_copy.assert_called_once_with(mackup_nested, home_nested)
+
+    def test_copy_files_from_mackup_folder_merges_directories_by_file_mtime(self):
+        """Restore should update only local entries that are older than backup ones."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_newer = os.path.join(home_dirpath, "home_newer.txt")
+        backup_newer = os.path.join(home_dirpath, "backup_newer.txt")
+        with open(home_newer, "w") as f:
+            f.write("home-value")
+        with open(backup_newer, "w") as f:
+            f.write("home-old-value")
+
+        backup_home_newer = os.path.join(mackup_dirpath, "home_newer.txt")
+        backup_backup_newer = os.path.join(mackup_dirpath, "backup_newer.txt")
+        with open(backup_home_newer, "w") as f:
+            f.write("backup-old-value")
+        with open(backup_backup_newer, "w") as f:
+            f.write("backup-value")
+
+        os.utime(home_newer, (300, 300))
+        os.utime(backup_home_newer, (100, 100))
+        os.utime(backup_newer, (100, 100))
+        os.utime(backup_backup_newer, (300, 300))
+
+        self.app_profile.copy_files_from_mackup_folder()
+
+        with open(home_newer) as f:
+            assert f.read() == "home-value"
+        with open(backup_newer) as f:
+            assert f.read() == "backup-value"
+        with open(backup_backup_newer) as f:
+            assert f.read() == "backup-value"
+
+    def test_sync_files_merges_directories_by_file_mtime(self):
+        """Sync should merge directories entry-by-entry based on file mtimes."""
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_newer = os.path.join(home_dirpath, "home_newer.txt")
+        backup_newer = os.path.join(home_dirpath, "backup_newer.txt")
+        with open(home_newer, "w") as f:
+            f.write("home-value")
+        with open(backup_newer, "w") as f:
+            f.write("home-old-value")
+
+        backup_home_newer = os.path.join(mackup_dirpath, "home_newer.txt")
+        backup_backup_newer = os.path.join(mackup_dirpath, "backup_newer.txt")
+        with open(backup_home_newer, "w") as f:
+            f.write("backup-old-value")
+        with open(backup_backup_newer, "w") as f:
+            f.write("backup-value")
+
+        # File "home_newer.txt" is newer in home, "backup_newer.txt" newer in backup.
+        os.utime(home_newer, (300, 300))
+        os.utime(backup_home_newer, (100, 100))
+        os.utime(backup_newer, (100, 100))
+        os.utime(backup_backup_newer, (300, 300))
+
+        self.app_profile.sync_files()
+
+        with open(os.path.join(home_dirpath, "home_newer.txt")) as f:
+            assert f.read() == "home-value"
+        with open(os.path.join(mackup_dirpath, "home_newer.txt")) as f:
+            assert f.read() == "home-value"
+
+        with open(os.path.join(home_dirpath, "backup_newer.txt")) as f:
+            assert f.read() == "backup-value"
+        with open(os.path.join(mackup_dirpath, "backup_newer.txt")) as f:
+            assert f.read() == "backup-value"
+
     def test_sync_files_logs_single_action_per_file(self):
         """Test sync emits one action line per file (no backup+restore double log)."""
         test_file = ".testfile"

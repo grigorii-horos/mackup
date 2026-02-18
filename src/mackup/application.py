@@ -47,6 +47,128 @@ class ApplicationProfile:
             os.path.join(self.mackup.mackup_folder, filename),
         )
 
+    @staticmethod
+    def get_effective_mtime(path: str) -> float:
+        """
+        Return comparable mtime for a file or directory.
+
+        For directories, the newest mtime in the whole tree is used so changes
+        to nested files/folders are considered during backup/restore/sync.
+        """
+        latest_mtime = os.path.getmtime(path)
+
+        if os.path.isdir(path):
+            for root, dirs, files in os.walk(path):
+                for name in dirs + files:
+                    entry_mtime = os.path.getmtime(os.path.join(root, name))
+                    if entry_mtime > latest_mtime:
+                        latest_mtime = entry_mtime
+
+        return latest_mtime
+
+    @staticmethod
+    def collect_relative_entries(root: str) -> set[str]:
+        """Collect all file and directory entries under root (relative paths)."""
+        entries: set[str] = set()
+        for cur_root, dirs, files in os.walk(root):
+            for name in dirs + files:
+                entries.add(os.path.relpath(os.path.join(cur_root, name), root))
+        return entries
+
+    def copy_item(self, source: str, destination: str) -> None:
+        """
+        Copy source item to destination, replacing destination when types differ.
+        """
+        if os.path.lexists(destination):
+            source_is_dir = os.path.isdir(source)
+            destination_is_dir = os.path.isdir(destination)
+            if source_is_dir != destination_is_dir:
+                utils.delete(destination)
+        utils.copy(source, destination)
+
+    def sync_directory_entries_one_way(
+        self, source_dir: str, destination_dir: str, source_wins: bool, dry_run: bool,
+    ) -> bool:
+        """
+        Sync directory entries from source to destination by per-entry mtime.
+
+        When source_wins is True, newer source entries overwrite destination.
+        When source_wins is False, this still compares mtimes but never copies
+        destination back to source; useful for skip-only behavior.
+        """
+        changed = False
+        source_entries = self.collect_relative_entries(source_dir)
+        destination_entries = self.collect_relative_entries(destination_dir)
+        all_entries = sorted(source_entries | destination_entries)
+
+        for entry in all_entries:
+            source_entry = os.path.join(source_dir, entry)
+            destination_entry = os.path.join(destination_dir, entry)
+            source_exists = os.path.exists(source_entry)
+            destination_exists = os.path.exists(destination_entry)
+
+            if source_exists and destination_exists:
+                source_is_dir = os.path.isdir(source_entry)
+                destination_is_dir = os.path.isdir(destination_entry)
+
+                if source_is_dir and destination_is_dir:
+                    continue
+
+                source_mtime = self.get_effective_mtime(source_entry)
+                destination_mtime = self.get_effective_mtime(destination_entry)
+
+                if source_wins and source_mtime > destination_mtime:
+                    if not dry_run:
+                        self.copy_item(source_entry, destination_entry)
+                    changed = True
+            elif source_exists:
+                if not dry_run:
+                    self.copy_item(source_entry, destination_entry)
+                changed = True
+
+        return changed
+
+    def sync_directory_entries(self, home_dir: str, backup_dir: str) -> None:
+        """
+        Synchronize two directories by comparing mtime per entry.
+        """
+        home_entries = self.collect_relative_entries(home_dir)
+        backup_entries = self.collect_relative_entries(backup_dir)
+        all_entries = sorted(home_entries | backup_entries)
+
+        for entry in all_entries:
+            home_entry = os.path.join(home_dir, entry)
+            backup_entry = os.path.join(backup_dir, entry)
+            home_exists = os.path.exists(home_entry)
+            backup_exists = os.path.exists(backup_entry)
+
+            if home_exists and backup_exists:
+                home_is_dir = os.path.isdir(home_entry)
+                backup_is_dir = os.path.isdir(backup_entry)
+
+                if home_is_dir and backup_is_dir:
+                    continue
+
+                if (not home_is_dir) and (not backup_is_dir):
+                    home_mtime = os.path.getmtime(home_entry)
+                    backup_mtime = os.path.getmtime(backup_entry)
+                    if home_mtime > backup_mtime:
+                        self.copy_item(home_entry, backup_entry)
+                    elif backup_mtime > home_mtime:
+                        self.copy_item(backup_entry, home_entry)
+                    continue
+
+                home_mtime = self.get_effective_mtime(home_entry)
+                backup_mtime = self.get_effective_mtime(backup_entry)
+                if home_mtime >= backup_mtime:
+                    self.copy_item(home_entry, backup_entry)
+                else:
+                    self.copy_item(backup_entry, home_entry)
+            elif home_exists:
+                self.copy_item(home_entry, backup_entry)
+            elif backup_exists:
+                self.copy_item(backup_entry, home_entry)
+
     def copy_files_to_mackup_folder(self) -> None:
         """
         Backup the application config files to the Mackup folder.
@@ -86,8 +208,29 @@ class ApplicationProfile:
                 # If exists mackup/file
                 if os.path.lexists(mackup_filepath):
                     if os.path.exists(mackup_filepath):
-                        source_mtime = os.path.getmtime(home_filepath)
-                        backup_mtime = os.path.getmtime(mackup_filepath)
+                        if os.path.isdir(home_filepath) and os.path.isdir(mackup_filepath):
+                            changed = self.sync_directory_entries_one_way(
+                                home_filepath, mackup_filepath, source_wins=True,
+                                dry_run=self.dry_run,
+                            )
+                            if not changed:
+                                if self.verbose:
+                                    print(
+                                        f"Skipping {home_filepath}\n"
+                                        f"  backup is newer or same age at\n  {mackup_filepath}",
+                                    )
+                                else:
+                                    print(f"Skipping {filename}")
+                            elif self.verbose:
+                                print(
+                                    f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
+                                )
+                            else:
+                                print(f"Backing up {filename} ...")
+                            continue
+
+                        source_mtime = self.get_effective_mtime(home_filepath)
+                        backup_mtime = self.get_effective_mtime(mackup_filepath)
                         if source_mtime <= backup_mtime:
                             if self.verbose:
                                 print(
@@ -143,7 +286,34 @@ class ApplicationProfile:
                 if (
                     os.path.exists(home_filepath)
                     and not utils.FORCE_YES
-                    and os.path.getmtime(home_filepath) >= os.path.getmtime(mackup_filepath)
+                    and os.path.isdir(home_filepath)
+                    and os.path.isdir(mackup_filepath)
+                ):
+                    changed = self.sync_directory_entries_one_way(
+                        mackup_filepath, home_filepath, source_wins=True,
+                        dry_run=self.dry_run,
+                    )
+                    if not changed:
+                        if self.verbose:
+                            print(
+                                f"Skipping {home_filepath}\n"
+                                f"  local file is newer or same age than\n  {mackup_filepath}",
+                            )
+                        else:
+                            print(f"Skipping {filename}")
+                    elif self.verbose:
+                        print(
+                            f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
+                        )
+                    else:
+                        print(f"Restoring {filename} ...")
+                    continue
+
+                if (
+                    os.path.exists(home_filepath)
+                    and not utils.FORCE_YES
+                    and self.get_effective_mtime(home_filepath)
+                    >= self.get_effective_mtime(mackup_filepath)
                 ):
                     if self.verbose:
                         print(
@@ -200,8 +370,29 @@ class ApplicationProfile:
                         print(f"Skipping {filename}")
                     continue
 
-                home_mtime = os.path.getmtime(home_filepath)
-                backup_mtime = os.path.getmtime(mackup_filepath)
+                # For directories we merge by entry mtime, not whole-tree mtime.
+                if os.path.isdir(home_filepath) and os.path.isdir(mackup_filepath):
+                    if self.verbose:
+                        print(
+                            f"Synchronizing\n  {home_filepath}\n  with\n  {mackup_filepath} ...",
+                        )
+                    else:
+                        print(f"Synchronizing {filename} ...")
+
+                    if self.dry_run:
+                        continue
+
+                    try:
+                        self.sync_directory_entries(home_filepath, mackup_filepath)
+                    except PermissionError as e:
+                        print(
+                            "Error: Unable to sync directory entries between "
+                            f"{home_filepath} and {mackup_filepath} due to permission issue: {e}",
+                        )
+                    continue
+
+                home_mtime = self.get_effective_mtime(home_filepath)
+                backup_mtime = self.get_effective_mtime(mackup_filepath)
                 if home_mtime > backup_mtime:
                     action = "backup"
                 elif backup_mtime > home_mtime:
