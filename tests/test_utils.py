@@ -340,6 +340,17 @@ class TestMackup(unittest.TestCase):
         with pytest.raises(SystemExit):
             utils.error(test_string)
 
+    def test_colorize_message_when_color_enabled(self):
+        with patch.object(utils, "supports_color_output", return_value=True):
+            formatted = utils.colorize_message("Restoring .testrc ...")
+        assert formatted.startswith(utils.AnsiColor.GREEN)
+        assert formatted.endswith(utils.AnsiColor.RESET)
+
+    def test_colorize_message_when_color_disabled(self):
+        with patch.object(utils, "supports_color_output", return_value=False):
+            formatted = utils.colorize_message("Restoring .testrc ...")
+        assert formatted == "Restoring .testrc ..."
+
     def test_failed_backup_location(self):
         """
         Tests for the error that should occur if the backup folder cannot be

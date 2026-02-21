@@ -68,6 +68,28 @@ def bold(text: str) -> str:
     return ColorFormatCodes.BOLD + text + ColorFormatCodes.NORMAL
 
 
+def get_action_label(stats: dict[str, int]) -> str:
+    """Return a past-tense action label describing what happened."""
+    backed_up = stats.get("backed_up", 0)
+    restored = stats.get("restored", 0)
+    synchronized = stats.get("synchronized", 0)
+    linked = stats.get("linked", 0)
+    reverted = stats.get("reverted", 0)
+    if reverted > 0:
+        return "Reverted"
+    if linked > 0:
+        return "Linked"
+    if backed_up > 0 and restored > 0:
+        return "Synchronized"
+    if backed_up > 0:
+        return "Backed up"
+    if restored > 0:
+        return "Restored"
+    if synchronized > 0:
+        return "Synchronized"
+    return "Skipped"
+
+
 def main() -> None:
     """Main function."""
     # Get the command line arg
@@ -89,10 +111,14 @@ def main() -> None:
     mckp: Mackup = Mackup(config_file)
     app_db: ApplicationsDatabase = ApplicationsDatabase()
 
-    def print_app_header(app_name: str) -> None:
+    def print_app_header(app_name: str, pretty_name: str) -> None:
         if verbose:
             header_str = header("---")
-            print(f"\n{header_str} {bold(app_name)} {header_str}")
+            print(f"\n{header_str} {bold(f'{app_name}: {pretty_name}')} {header_str}")
+
+    def print_app_result(stats: dict[str, int], app_name: str, pretty_name: str) -> None:
+        action = get_action_label(stats)
+        print(utils.colorize_message(f"{action} {app_name}: {pretty_name}"))
 
     # If we want to answer mackup with "yes" for each question
     if args["--force"]:
@@ -143,11 +169,13 @@ def main() -> None:
 
         # Create a backup of the files of each application
         for app_name in sorted(mckp.get_apps_to_backup()):
+            pretty_name = app_db.get_name(app_name)
             app: ApplicationProfile = ApplicationProfile(
                 mckp, app_db.get_files(app_name), dry_run, verbose,
             )
-            print_app_header(app_name)
-            app.copy_files_to_mackup_folder()
+            print_app_header(app_name, pretty_name)
+            stats = app.copy_files_to_mackup_folder()
+            print_app_result(stats, app_name, pretty_name)
 
     # mackup restore
     elif args["restore"]:
@@ -155,9 +183,11 @@ def main() -> None:
 
         # Recover a backup of the files of each application
         for app_name in sorted(mckp.get_apps_to_backup()):
+            pretty_name = app_db.get_name(app_name)
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
-            print_app_header(app_name)
-            app.copy_files_from_mackup_folder()
+            print_app_header(app_name, pretty_name)
+            stats = app.copy_files_from_mackup_folder()
+            print_app_result(stats, app_name, pretty_name)
 
     # mackup sync
     elif args["sync"]:
@@ -166,9 +196,11 @@ def main() -> None:
         # Synchronize in two phases:
         # one pass per file: decide direction by mtime and do one action.
         for app_name in sorted(mckp.get_apps_to_backup()):
+            pretty_name = app_db.get_name(app_name)
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
-            print_app_header(app_name)
-            app.sync_files()
+            print_app_header(app_name, pretty_name)
+            stats = app.sync_files()
+            print_app_result(stats, app_name, pretty_name)
 
     # mackup link install
     elif args["link"] and args["install"]:
@@ -177,9 +209,11 @@ def main() -> None:
 
         # Create a link for each application
         for app_name in sorted(mckp.get_apps_to_backup()):
+            pretty_name = app_db.get_name(app_name)
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
-            print_app_header(app_name)
-            app.link_install()
+            print_app_header(app_name, pretty_name)
+            stats = app.link_install()
+            print_app_result(stats, app_name, pretty_name)
 
     # mackup link uninstall
     elif args["link"] and args["uninstall"]:
@@ -201,18 +235,23 @@ def main() -> None:
             app_names.discard(MACKUP_APP_NAME)
 
             for app_name in sorted(app_names):
+                pretty_name = app_db.get_name(app_name)
                 app = ApplicationProfile(
                     mckp, app_db.get_files(app_name), dry_run, verbose,
                 )
-                print_app_header(app_name)
-                app.link_uninstall()
+                print_app_header(app_name, pretty_name)
+                stats = app.link_uninstall()
+                print_app_result(stats, app_name, pretty_name)
 
             # Restore the Mackup config before any other config, as we might
             # need it to know about custom settings
             mackup_app = ApplicationProfile(
                 mckp, app_db.get_files(MACKUP_APP_NAME), dry_run, verbose,
             )
-            mackup_app.link_uninstall()
+            pretty_name = app_db.get_name(MACKUP_APP_NAME)
+            print_app_header(MACKUP_APP_NAME, pretty_name)
+            stats = mackup_app.link_uninstall()
+            print_app_result(stats, MACKUP_APP_NAME, pretty_name)
 
             # Delete the Mackup folder in Dropbox
             # Don't delete this as there might be other Macs that aren't
@@ -237,8 +276,10 @@ def main() -> None:
         mackup_app = ApplicationProfile(
             mckp, app_db.get_files(MACKUP_APP_NAME), dry_run, verbose,
         )
-        print_app_header(MACKUP_APP_NAME)
-        mackup_app.link()
+        mackup_pretty = app_db.get_name(MACKUP_APP_NAME)
+        print_app_header(MACKUP_APP_NAME, mackup_pretty)
+        stats = mackup_app.link()
+        print_app_result(stats, MACKUP_APP_NAME, mackup_pretty)
 
         # Initialize again the apps db, as the Mackup config might have changed
         # it
@@ -251,9 +292,11 @@ def main() -> None:
         app_names.discard(MACKUP_APP_NAME)
 
         for app_name in sorted(app_names):
+            pretty_name = app_db.get_name(app_name)
             app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
-            print_app_header(app_name)
-            app.link()
+            print_app_header(app_name, pretty_name)
+            stats = app.link()
+            print_app_result(stats, app_name, pretty_name)
 
     # Delete the tmp folder
     mckp.clean_temp_folder()

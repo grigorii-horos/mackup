@@ -23,6 +23,73 @@ FORCE_NO: bool = False
 CAN_RUN_AS_ROOT: bool = False
 
 
+class AnsiColor:
+    """ANSI color/style escape codes."""
+
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RED = "\033[91m"
+    GRAY = "\033[90m"
+    WHITE = "\033[37m"
+
+
+def supports_color_output() -> bool:
+    """Return True when colored output should be used."""
+    if os.environ.get("NO_COLOR"):
+        return False
+
+    if os.environ.get("CLICOLOR_FORCE", "0") != "0":
+        return True
+
+    force_color = os.environ.get("FORCE_COLOR", "").lower()
+    if force_color in {"1", "true", "yes"}:
+        return True
+
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+def style_text(text: str, color: str = "", bold: bool = False) -> str:
+    """Apply ANSI styles when color output is enabled."""
+    if not supports_color_output():
+        return text
+
+    prefix = ""
+    if bold:
+        prefix += AnsiColor.BOLD
+    if color:
+        prefix += color
+    return f"{prefix}{text}{AnsiColor.RESET}"
+
+
+def colorize_message(message: str) -> str:
+    """Colorize user-facing terminal messages by status prefix."""
+    styles: tuple[tuple[str, str, bool], ...] = (
+        ("Error:", AnsiColor.RED, True),
+        ("Warning:", AnsiColor.YELLOW, True),
+        ("Backed up", AnsiColor.CYAN, False),
+        ("Backing up", AnsiColor.CYAN, False),
+        ("Restored", AnsiColor.GREEN, False),
+        ("Restoring", AnsiColor.GREEN, False),
+        ("Synchronized", AnsiColor.BLUE, False),
+        ("Synchronizing", AnsiColor.BLUE, False),
+        ("Linked", AnsiColor.BLUE, False),
+        ("Linking", AnsiColor.BLUE, False),
+        ("Reverted", AnsiColor.YELLOW, False),
+        ("Reverting", AnsiColor.YELLOW, False),
+        ("Skipped", AnsiColor.WHITE, False),
+        ("Skipping", AnsiColor.WHITE, False),
+        ("Doing nothing", AnsiColor.GRAY, False),
+    )
+    for prefix, color, bold in styles:
+        if message.startswith(prefix):
+            return style_text(message, color=color, bold=bold)
+    return message
+
+
 def confirm(question: str) -> bool:
     """
     Ask the user if he really wants something to happen.
@@ -193,9 +260,7 @@ def error(message: str) -> NoReturn:
     Args:
         message(str): The message to display.
     """
-    fail: str = "\033[91m"
-    end: str = "\033[0m"
-    sys.exit(fail + f"Error: {message}" + end)
+    sys.exit(style_text(f"Error: {message}", color=AnsiColor.RED, bold=True))
 
 
 def get_dropbox_folder_location() -> str:

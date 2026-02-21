@@ -32,6 +32,11 @@ class ApplicationProfile:
         self.dry_run: bool = dry_run
         self.verbose: bool = verbose
 
+    @staticmethod
+    def _print(message: str) -> None:
+        """Print a user-facing message with terminal color highlighting."""
+        print(utils.colorize_message(message))
+
     def get_filepaths(self, filename: str) -> tuple[str, str]:
         """
         Get home and mackup filepaths for given file
@@ -156,10 +161,14 @@ class ApplicationProfile:
 
         return changed
 
-    def sync_directory_entries(self, home_dir: str, backup_dir: str) -> None:
+    def sync_directory_entries(self, home_dir: str, backup_dir: str) -> bool:
         """
         Synchronize two directories by comparing mtime per entry.
+
+        Returns True if any files were actually copied or updated.
         """
+        changed = False
+
         home_root_mtime = os.path.getmtime(home_dir)
         backup_root_mtime = os.path.getmtime(backup_dir)
         if home_root_mtime > backup_root_mtime:
@@ -194,9 +203,15 @@ class ApplicationProfile:
                     home_mtime = os.path.getmtime(home_entry)
                     backup_mtime = os.path.getmtime(backup_entry)
                     if home_mtime > backup_mtime:
+                        if self.verbose:
+                            self._print(f"Backing up {entry}")
                         self.copy_item(home_entry, backup_entry)
+                        changed = True
                     elif backup_mtime > home_mtime:
+                        if self.verbose:
+                            self._print(f"Restoring {entry}")
                         self.copy_item(backup_entry, home_entry)
+                        changed = True
                     continue
 
                 home_mtime = self.get_effective_mtime(home_entry)
@@ -207,26 +222,40 @@ class ApplicationProfile:
                             utils.delete(backup_entry)
                         self.ensure_directory(backup_entry, home_entry)
                     else:
+                        if self.verbose:
+                            self._print(f"Backing up {entry}")
                         self.copy_item(home_entry, backup_entry)
+                    changed = True
                 else:
                     if backup_is_dir:
                         if os.path.lexists(home_entry) and not home_is_dir:
                             utils.delete(home_entry)
                         self.ensure_directory(home_entry, backup_entry)
                     else:
+                        if self.verbose:
+                            self._print(f"Restoring {entry}")
                         self.copy_item(backup_entry, home_entry)
+                    changed = True
             elif home_exists:
+                if self.verbose:
+                    self._print(f"Backing up {entry}")
                 if os.path.isdir(home_entry):
                     self.ensure_directory(backup_entry, home_entry)
                 else:
                     self.copy_item(home_entry, backup_entry)
+                changed = True
             elif backup_exists:
+                if self.verbose:
+                    self._print(f"Restoring {entry}")
                 if os.path.isdir(backup_entry):
                     self.ensure_directory(home_entry, backup_entry)
                 else:
                     self.copy_item(backup_entry, home_entry)
+                changed = True
 
-    def copy_files_to_mackup_folder(self) -> None:
+        return changed
+
+    def copy_files_to_mackup_folder(self) -> dict[str, int]:
         """
         Backup the application config files to the Mackup folder.
 
@@ -241,6 +270,8 @@ class ApplicationProfile:
                             rm mackup/file
                     cp home/file mackup/file
         """
+        stats: dict[str, int] = {"backed_up": 0, "skipped": 0, "errors": 0}
+
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
 
@@ -254,12 +285,11 @@ class ApplicationProfile:
                     and os.path.samefile(home_filepath, mackup_filepath)
                 ):
                     if self.verbose:
-                        print(
+                        self._print(
                             f"Skipping {home_filepath}\n"
                             f"  already linked to\n  {mackup_filepath}",
                         )
-                    else:
-                        print(f"Skipping {filename} (already linked)")
+                    stats["skipped"] += 1
                     continue
 
                 # If exists mackup/file
@@ -272,40 +302,37 @@ class ApplicationProfile:
                             )
                             if not changed:
                                 if self.verbose:
-                                    print(
+                                    self._print(
                                         f"Skipping {home_filepath}\n"
                                         f"  backup is newer or same age at\n  {mackup_filepath}",
                                     )
-                                else:
-                                    print(f"Skipping {filename}")
-                            elif self.verbose:
-                                print(
-                                    f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
-                                )
+                                stats["skipped"] += 1
                             else:
-                                print(f"Backing up {filename} ...")
+                                if self.verbose:
+                                    self._print(
+                                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
+                                    )
+                                stats["backed_up"] += 1
                             continue
 
                         source_mtime = self.get_effective_mtime(home_filepath)
                         backup_mtime = self.get_effective_mtime(mackup_filepath)
                         if source_mtime <= backup_mtime:
                             if self.verbose:
-                                print(
+                                self._print(
                                     f"Skipping {home_filepath}\n"
                                     f"  backup is newer or same age at\n  {mackup_filepath}",
                                 )
-                            else:
-                                print(f"Skipping {filename}")
+                            stats["skipped"] += 1
                             continue
 
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
                     )
-                else:
-                    print(f"Backing up {filename} ...")
 
                 if self.dry_run:
+                    stats["backed_up"] += 1
                     continue
 
                 if os.path.lexists(mackup_filepath):
@@ -315,13 +342,17 @@ class ApplicationProfile:
                 # Copy the file
                 try:
                     utils.copy(home_filepath, mackup_filepath)
+                    stats["backed_up"] += 1
                 except PermissionError as e:
-                    print(
+                    self._print(
                         f"Error: Unable to copy file from {home_filepath} to "
                         f"{mackup_filepath} due to permission issue: {e}",
                     )
+                    stats["errors"] += 1
 
-    def copy_files_from_mackup_folder(self) -> None:
+        return stats
+
+    def copy_files_from_mackup_folder(self) -> dict[str, int]:
         """
         Recover the application config files from the Mackup folder.
 
@@ -334,6 +365,8 @@ class ApplicationProfile:
                         rm home/file
                     cp mackup/file home/file
         """
+        stats: dict[str, int] = {"restored": 0, "skipped": 0, "errors": 0}
+
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
 
@@ -352,18 +385,17 @@ class ApplicationProfile:
                     )
                     if not changed:
                         if self.verbose:
-                            print(
+                            self._print(
                                 f"Skipping {home_filepath}\n"
                                 f"  local file is newer or same age than\n  {mackup_filepath}",
                             )
-                        else:
-                            print(f"Skipping {filename}")
-                    elif self.verbose:
-                        print(
-                            f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
-                        )
+                        stats["skipped"] += 1
                     else:
-                        print(f"Restoring {filename} ...")
+                        if self.verbose:
+                            self._print(
+                                f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
+                            )
+                        stats["restored"] += 1
                     continue
 
                 if (
@@ -373,22 +405,20 @@ class ApplicationProfile:
                     >= self.get_effective_mtime(mackup_filepath)
                 ):
                     if self.verbose:
-                        print(
+                        self._print(
                             f"Skipping {home_filepath}\n"
                             f"  local file is newer or same age than\n  {mackup_filepath}",
                         )
-                    else:
-                        print(f"Skipping {filename}")
+                    stats["skipped"] += 1
                     continue
 
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
                     )
-                else:
-                    print(f"Restoring {filename} ...")
 
                 if self.dry_run:
+                    stats["restored"] += 1
                     continue
 
                 # If exists home/file, overwrite it.
@@ -398,14 +428,23 @@ class ApplicationProfile:
                 # Copy the file
                 try:
                     utils.copy(mackup_filepath, home_filepath)
+                    stats["restored"] += 1
                 except PermissionError as e:
-                    print(
+                    self._print(
                         f"Error: Unable to copy file from {mackup_filepath} to "
                         f"{home_filepath} due to permission issue: {e}",
                     )
+                    stats["errors"] += 1
 
-    def sync_files(self) -> None:
+        return stats
+
+    def sync_files(self) -> dict[str, int]:
         """Synchronize files between home and Mackup using mtime."""
+        stats: dict[str, int] = {
+            "backed_up": 0, "restored": 0, "synchronized": 0,
+            "skipped": 0, "errors": 0,
+        }
+
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
 
@@ -419,33 +458,36 @@ class ApplicationProfile:
                 # Already linked/same inode, nothing to do.
                 if os.path.samefile(home_filepath, mackup_filepath):
                     if self.verbose:
-                        print(
+                        self._print(
                             f"Skipping {home_filepath}\n"
                             f"  already linked to\n  {mackup_filepath}",
                         )
-                    else:
-                        print(f"Skipping {filename}")
+                    stats["skipped"] += 1
                     continue
 
                 # For directories we merge by entry mtime, not whole-tree mtime.
                 if os.path.isdir(home_filepath) and os.path.isdir(mackup_filepath):
                     if self.verbose:
-                        print(
+                        self._print(
                             f"Synchronizing\n  {home_filepath}\n  with\n  {mackup_filepath} ...",
                         )
-                    else:
-                        print(f"Synchronizing {filename} ...")
 
                     if self.dry_run:
+                        stats["synchronized"] += 1
                         continue
 
                     try:
-                        self.sync_directory_entries(home_filepath, mackup_filepath)
+                        dir_changed = self.sync_directory_entries(home_filepath, mackup_filepath)
+                        if dir_changed:
+                            stats["synchronized"] += 1
+                        else:
+                            stats["skipped"] += 1
                     except PermissionError as e:
-                        print(
+                        self._print(
                             "Error: Unable to sync directory entries between "
                             f"{home_filepath} and {mackup_filepath} due to permission issue: {e}",
                         )
+                        stats["errors"] += 1
                     continue
 
                 home_mtime = self.get_effective_mtime(home_filepath)
@@ -461,23 +503,21 @@ class ApplicationProfile:
 
             if action is None:
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Skipping {home_filepath}\n"
                         f"  same mtime as\n  {mackup_filepath}",
                     )
-                else:
-                    print(f"Skipping {filename}")
+                stats["skipped"] += 1
                 continue
 
             if action == "backup":
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
                     )
-                else:
-                    print(f"Backing up {filename} ...")
 
                 if self.dry_run:
+                    stats["backed_up"] += 1
                     continue
 
                 if os.path.lexists(mackup_filepath):
@@ -485,20 +525,21 @@ class ApplicationProfile:
 
                 try:
                     utils.copy(home_filepath, mackup_filepath)
+                    stats["backed_up"] += 1
                 except PermissionError as e:
-                    print(
+                    self._print(
                         f"Error: Unable to copy file from {home_filepath} to "
                         f"{mackup_filepath} due to permission issue: {e}",
                     )
+                    stats["errors"] += 1
             else:
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
                     )
-                else:
-                    print(f"Restoring {filename} ...")
 
                 if self.dry_run:
+                    stats["restored"] += 1
                     continue
 
                 if os.path.lexists(home_filepath):
@@ -506,13 +547,17 @@ class ApplicationProfile:
 
                 try:
                     utils.copy(mackup_filepath, home_filepath)
+                    stats["restored"] += 1
                 except PermissionError as e:
-                    print(
+                    self._print(
                         f"Error: Unable to copy file from {mackup_filepath} to "
                         f"{home_filepath} due to permission issue: {e}",
                     )
+                    stats["errors"] += 1
 
-    def link_install(self) -> None:
+        return stats
+
+    def link_install(self) -> dict[str, int]:
         """
         Create the application config file links.
 
@@ -529,6 +574,8 @@ class ApplicationProfile:
                   mv home/file mackup/file
                   link mackup/file home/file
         """
+        stats: dict[str, int] = {"linked": 0, "skipped": 0}
+
         # For each file used by the application
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
@@ -540,13 +587,12 @@ class ApplicationProfile:
                 and os.path.samefile(home_filepath, mackup_filepath)
             ):
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
                     )
-                else:
-                    print(f"Linking {filename} ...")
 
                 if self.dry_run:
+                    stats["linked"] += 1
                     continue
 
                 # Check if we already have a backup
@@ -575,6 +621,9 @@ class ApplicationProfile:
                         utils.delete(home_filepath)
                         # Link the backuped file to its original place
                         utils.link(mackup_filepath, home_filepath)
+                        stats["linked"] += 1
+                    else:
+                        stats["skipped"] += 1
                 else:
                     # Copy the file
                     utils.copy(home_filepath, mackup_filepath)
@@ -582,21 +631,24 @@ class ApplicationProfile:
                     utils.delete(home_filepath)
                     # Link the backuped file to its original place
                     utils.link(mackup_filepath, home_filepath)
+                    stats["linked"] += 1
             elif self.verbose:
                 if os.path.exists(home_filepath):
-                    print(
+                    self._print(
                         f"Doing nothing\n  {home_filepath}\n  "
                         f"is already backed up to\n  {mackup_filepath}",
                     )
                 elif os.path.islink(home_filepath):
-                    print(
+                    self._print(
                         f"Doing nothing\n  {home_filepath}\n  "
                         "is a broken link, you might want to fix it.",
                     )
                 else:
-                    print(f"Doing nothing\n  {home_filepath}\n  does not exist")
+                    self._print(f"Doing nothing\n  {home_filepath}\n  does not exist")
 
-    def link(self) -> None:
+        return stats
+
+    def link(self) -> dict[str, int]:
         """
         Link the application config files.
 
@@ -610,6 +662,8 @@ class ApplicationProfile:
               else
                 link mackup/file home/file
         """
+        stats: dict[str, int] = {"linked": 0, "skipped": 0}
+
         # For each file used by the application
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
@@ -629,14 +683,13 @@ class ApplicationProfile:
 
             if file_or_dir_exists and not pointing_to_mackup and supported:
                 if self.verbose:
-                    print(
+                    self._print(
                         f"Restoring\n  linking {home_filepath}\n"
                         f"  to      {mackup_filepath} ...",
                     )
-                else:
-                    print(f"Restoring {filename} ...")
 
                 if self.dry_run:
+                    stats["linked"] += 1
                     continue
 
                 # Check if there is already a file in the home folder
@@ -657,25 +710,31 @@ class ApplicationProfile:
                     ):
                         utils.delete(home_filepath)
                         utils.link(mackup_filepath, home_filepath)
+                        stats["linked"] += 1
+                    else:
+                        stats["skipped"] += 1
                 else:
                     utils.link(mackup_filepath, home_filepath)
+                    stats["linked"] += 1
             elif self.verbose:
                 if os.path.exists(home_filepath):
-                    print(
+                    self._print(
                         f"Doing nothing\n  {mackup_filepath}\n"
                         f"  already linked by\n  {home_filepath}",
                     )
                 elif os.path.islink(home_filepath):
-                    print(
+                    self._print(
                         f"Doing nothing\n  {home_filepath}\n  "
                         "is a broken link, you might want to fix it.",
                     )
                 else:
-                    print(
+                    self._print(
                         f"Doing nothing\n  {mackup_filepath}\n  does not exist",
                     )
 
-    def link_uninstall(self) -> None:
+        return stats
+
+    def link_uninstall(self) -> dict[str, int]:
         """
         Removes links and copy config files from the remote folder locally.
 
@@ -686,6 +745,8 @@ class ApplicationProfile:
                         delete home/file
                     copy mackup/file home/file
         """
+        stats: dict[str, int] = {"reverted": 0, "skipped": 0, "warnings": 0}
+
         # For each file used by the application
         for filename in self.files:
             (home_filepath, mackup_filepath) = self.get_filepaths(filename)
@@ -699,20 +760,20 @@ class ApplicationProfile:
                     if not os.path.islink(home_filepath) or not os.path.samefile(
                         home_filepath, mackup_filepath,
                     ):
-                        print(
+                        self._print(
                             f'Warning: the file in your home "{home_filepath}" '
                             f"does not point to the original file in Mackup "
                             f"{mackup_filepath}, skipping...",
                         )
+                        stats["warnings"] += 1
                         continue
                     if self.verbose:
-                        print(
+                        self._print(
                             f"Reverting {mackup_filepath}\n at {home_filepath} ...",
                         )
-                    else:
-                        print(f"Reverting {filename} ...")
 
                     if self.dry_run:
+                        stats["reverted"] += 1
                         continue
 
                     # If there is, delete it as we are gonna copy the Dropbox
@@ -721,5 +782,8 @@ class ApplicationProfile:
 
                     # Copy the Dropbox file to the home folder
                     utils.copy(mackup_filepath, home_filepath)
+                    stats["reverted"] += 1
             elif self.verbose:
-                print(f"Doing nothing, {mackup_filepath} does not exist")
+                self._print(f"Doing nothing, {mackup_filepath} does not exist")
+
+        return stats
