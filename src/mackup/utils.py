@@ -180,9 +180,6 @@ def copy(src: str, dst: str) -> None:
     else:
         raise ValueError(f"Unsupported file: {src}")
 
-    # Set the good mode to the file or folder recursively
-    chmod(dst)
-
 
 def link(target: str, link_to: str) -> None:
     """
@@ -210,8 +207,8 @@ def link(target: str, link_to: str) -> None:
     if not os.path.isdir(abs_path):
         os.makedirs(abs_path)
 
-    # Make sure the file or folder recursively has the good mode
-    chmod(target)
+    # Remove immutable attributes so the link can be created
+    remove_immutable_attribute(target)
 
     # Create the link to target
     os.symlink(target, link_to)
@@ -229,13 +226,16 @@ def chmod(target: str) -> None:
     assert isinstance(target, str)
     assert os.path.exists(target)
 
-    file_mode = stat.S_IRUSR | stat.S_IWUSR
+    base_file_mode = stat.S_IRUSR | stat.S_IWUSR
     folder_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+    exec_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
     # Remove the immutable attribute recursively if there is one
     remove_immutable_attribute(target)
 
     if os.path.isfile(target):
+        current = os.stat(target).st_mode
+        file_mode = base_file_mode | (stat.S_IXUSR if current & exec_bits else 0)
         os.chmod(target, file_mode)
 
     elif os.path.isdir(target):
@@ -247,7 +247,10 @@ def chmod(target: str) -> None:
             for cur_dir in dirs:
                 os.chmod(os.path.join(root, cur_dir), folder_mode)
             for cur_file in files:
-                os.chmod(os.path.join(root, cur_file), file_mode)
+                filepath = os.path.join(root, cur_file)
+                current = os.stat(filepath).st_mode
+                file_mode = base_file_mode | (stat.S_IXUSR if current & exec_bits else 0)
+                os.chmod(filepath, file_mode)
 
     else:
         raise ValueError(f"Unsupported file type: {target}")

@@ -118,7 +118,7 @@ def main() -> None:
 
     def print_app_result(stats: dict[str, int], app_name: str, pretty_name: str) -> None:
         action = get_action_label(stats)
-        print(utils.colorize_message(f"{action} {app_name}: {pretty_name}"))
+        print(utils.colorize_message(f"{action} {pretty_name}"))
 
     # If we want to answer mackup with "yes" for each question
     if args["--force"]:
