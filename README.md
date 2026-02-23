@@ -850,6 +850,21 @@ Another example with a full-path fallback:
 
 - `linux:`, `mac:`, `windows:` are supported keys
 - the last unkeyed item is the fallback
+- in this fork, the fallback also acts as the canonical backup path
+
+This means the selector can map different local paths to one shared backup path.
+Example:
+
+```ini
+[configuration_files]
+[mac:@CONFIG@/MyApp/config.json,linux:@CONFIG@/myapp/config.json,@CONFIG@/shared/myapp-config.json]
+```
+
+Behavior:
+
+- macOS local path: `@CONFIG@/MyApp/config.json`
+- Linux local path: `@CONFIG@/myapp/config.json`
+- backup path (all platforms): `@CONFIG@/shared/myapp-config.json`
 
 ### 3. Built-in cross-platform variables
 
@@ -864,7 +879,7 @@ These are Mackup-specific aliases (not OS environment variables):
 
 Path templates are resolved in this order:
 
-1. Platform selector `[...]`
+1. Platform selector `[...]` (produces local path + canonical backup path)
 2. Built-in variables (`@CONFIG@`, `@DATA@`, `@STATE@`, `@CACHE@`)
 3. Brace expansion `{...}`
 

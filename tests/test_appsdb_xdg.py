@@ -196,6 +196,29 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
                 == ".config/app/other.conf"
             )
 
+    def test_platform_selector_mapping_uses_fallback_as_backup_path(self):
+        """Unkeyed fallback acts as canonical backup path for all platforms."""
+        with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+            local_path, backup_path = ApplicationsDatabase._resolve_platform_selectors_with_backup(
+                "[mac:a/b/c,linux:x/y/z,m/n/o]",
+            )
+            assert local_path == "a/b/c"
+            assert backup_path == "m/n/o"
+
+        with patch("mackup.appsdb.platform.system", return_value="Linux"):
+            local_path, backup_path = ApplicationsDatabase._resolve_platform_selectors_with_backup(
+                "[mac:a/b/c,linux:x/y/z,m/n/o]",
+            )
+            assert local_path == "x/y/z"
+            assert backup_path == "m/n/o"
+
+        with patch("mackup.appsdb.platform.system", return_value="Linux"):
+            local_path, backup_path = ApplicationsDatabase._resolve_platform_selectors_with_backup(
+                "[mac:a/b/c,m/n/o]",
+            )
+            assert local_path == "m/n/o"
+            assert backup_path == "m/n/o"
+
     def test_cross_platform_builtin_variables_expand(self):
         """Generic built-in vars should map to platform-specific directories."""
         with patch("mackup.appsdb.platform.system", return_value="Linux"):
@@ -263,6 +286,50 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
                 assert ".config/app/common.conf" in files
                 assert ".config/app/other.conf" not in files
                 assert "Library/Application Support/app/mac.conf" not in files
+                mappings = db.get_file_mappings("platform-selector-test")
+                assert (".config/app/linux.conf", ".config/app/other.conf") in mappings
+                assert (".config/app/common.conf", ".config/app/other.conf") in mappings
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old_xdg
+            shutil.rmtree(temp_home)
+
+    def test_applications_database_keeps_distinct_local_and_backup_paths(self):
+        """Mappings should preserve per-platform local path and canonical backup path."""
+        temp_home = tempfile.mkdtemp()
+        temp_xdg = os.path.join(temp_home, ".config")
+        legacy_apps_dir = os.path.join(temp_home, ".mackup")
+        os.makedirs(legacy_apps_dir, exist_ok=True)
+
+        cfg_path = os.path.join(legacy_apps_dir, "mapping-test.cfg")
+        with open(cfg_path, "w") as f:
+            f.write(
+                "[application]\n"
+                "name = Mapping Test\n\n"
+                "[configuration_files]\n"
+                "[mac:@CONFIG@/MyApp/config.json,linux:@CONFIG@/myapp/config.json,@DATA@/shared/myapp-config.json]\n",
+            )
+
+        old_home = os.environ.get("HOME")
+        old_xdg = os.environ.get("XDG_CONFIG_HOME")
+        try:
+            os.environ["HOME"] = temp_home
+            os.environ["XDG_CONFIG_HOME"] = temp_xdg
+
+            with patch("mackup.appsdb.platform.system", return_value="Linux"):
+                db = ApplicationsDatabase()
+                assert ".config/myapp/config.json" in db.get_files("mapping-test")
+                mappings = db.get_file_mappings("mapping-test")
+                assert (
+                    ".config/myapp/config.json",
+                    ".local/share/shared/myapp-config.json",
+                ) in mappings
         finally:
             if old_home is None:
                 os.environ.pop("HOME", None)

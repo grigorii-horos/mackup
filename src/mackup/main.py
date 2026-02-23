@@ -179,7 +179,7 @@ def main() -> None:
         for app_name in sorted(mckp.get_apps_to_backup()):
             pretty_name = app_db.get_name(app_name)
             app: ApplicationProfile = ApplicationProfile(
-                mckp, app_db.get_files(app_name), dry_run, verbose,
+                mckp, app_db.get_file_mappings(app_name), dry_run, verbose,
             )
             print_app_header(app_name, pretty_name)
             stats = app.copy_files_to_mackup_folder()
@@ -192,7 +192,7 @@ def main() -> None:
         # Recover a backup of the files of each application
         for app_name in sorted(mckp.get_apps_to_backup()):
             pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
             print_app_header(app_name, pretty_name)
             stats = app.copy_files_from_mackup_folder()
             print_app_result(stats, app_name, pretty_name)
@@ -205,7 +205,7 @@ def main() -> None:
         # one pass per file: decide direction by mtime and do one action.
         for app_name in sorted(mckp.get_apps_to_backup()):
             pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
             print_app_header(app_name, pretty_name)
             stats = app.sync_files()
             print_app_result(stats, app_name, pretty_name)
@@ -218,7 +218,7 @@ def main() -> None:
         # Create a link for each application
         for app_name in sorted(mckp.get_apps_to_backup()):
             pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
             print_app_header(app_name, pretty_name)
             stats = app.link_install()
             print_app_result(stats, app_name, pretty_name)
@@ -245,16 +245,17 @@ def main() -> None:
             for app_name in sorted(app_names):
                 pretty_name = app_db.get_name(app_name)
                 app = ApplicationProfile(
-                    mckp, app_db.get_files(app_name), dry_run, verbose,
+                    mckp, app_db.get_file_mappings(app_name), dry_run, verbose,
                 )
                 print_app_header(app_name, pretty_name)
                 stats = app.link_uninstall()
                 print_app_result(stats, app_name, pretty_name)
+ 
 
             # Restore the Mackup config before any other config, as we might
             # need it to know about custom settings
             mackup_app = ApplicationProfile(
-                mckp, app_db.get_files(MACKUP_APP_NAME), dry_run, verbose,
+                mckp, app_db.get_file_mappings(MACKUP_APP_NAME), dry_run, verbose,
             )
             pretty_name = app_db.get_name(MACKUP_APP_NAME)
             print_app_header(MACKUP_APP_NAME, pretty_name)
@@ -282,7 +283,7 @@ def main() -> None:
         # Restore the Mackup config before any other config, as we might need
         # it to know about custom settings
         mackup_app = ApplicationProfile(
-            mckp, app_db.get_files(MACKUP_APP_NAME), dry_run, verbose,
+            mckp, app_db.get_file_mappings(MACKUP_APP_NAME), dry_run, verbose,
         )
         mackup_pretty = app_db.get_name(MACKUP_APP_NAME)
         print_app_header(MACKUP_APP_NAME, mackup_pretty)
@@ -301,7 +302,7 @@ def main() -> None:
 
         for app_name in sorted(app_names):
             pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_files(app_name), dry_run, verbose)
+            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
             print_app_header(app_name, pretty_name)
             stats = app.link()
             print_app_result(stats, app_name, pretty_name)

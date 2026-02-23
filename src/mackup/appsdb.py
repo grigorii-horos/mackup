@@ -65,6 +65,90 @@ class ApplicationsDatabase:
         parts.append("".join(current))
         return parts
 
+    @classmethod
+    def _resolve_platform_selectors_with_backup(cls, path: str) -> tuple[str, str]:
+        """
+        Resolve selectors returning (local_path_expr, backup_path_expr).
+
+        Semantics for `[linux:...,mac:...,windows:...,fallback]`:
+        - local path: selected platform branch, otherwise fallback
+        - backup path: fallback (canonical path)
+
+        If no fallback exists, backup path falls back to the selected path.
+        """
+        start = path.find("[")
+        if start == -1:
+            return (path, path)
+
+        depth = 0
+        end = -1
+        for idx in range(start, len(path)):
+            if path[idx] == "[":
+                depth += 1
+            elif path[idx] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = idx
+                    break
+
+        if end == -1:
+            return (path, path)
+
+        inner = path[start + 1:end]
+        items = cls._split_top_level_items(inner)
+        if len(items) <= 1:
+            return (path, path)
+
+        platform_alias = cls._current_platform_alias()
+        platform_keys = {
+            "linux": "linux",
+            "lin": "linux",
+            "mac": "mac",
+            "macos": "mac",
+            "osx": "mac",
+            "darwin": "mac",
+            "windows": "windows",
+            "win": "windows",
+        }
+
+        selected: str | None = None
+        fallback: str | None = None
+        saw_selector_syntax = False
+
+        for item in items:
+            token = item.strip()
+            if ":" in token:
+                key, value = token.split(":", 1)
+                norm_key = platform_keys.get(key.strip().lower())
+                if norm_key is None:
+                    continue
+                saw_selector_syntax = True
+                if norm_key == platform_alias and selected is None:
+                    selected = value.strip()
+            elif fallback is None:
+                fallback = token
+
+        if not saw_selector_syntax and fallback is None:
+            return (path, path)
+
+        local_replacement = selected if selected is not None else fallback
+        if local_replacement is None:
+            return (path, path)
+        backup_replacement = fallback if fallback is not None else local_replacement
+
+        prefix = path[:start]
+        suffix = path[end + 1:]
+
+        def join_parts(replacement: str) -> str:
+            suffix_part = suffix
+            if replacement.endswith("/") and suffix_part.startswith("/"):
+                suffix_part = suffix_part[1:]
+            return f"{prefix}{replacement}{suffix_part}"
+
+        local_path = join_parts(local_replacement)
+        backup_path = join_parts(backup_replacement)
+        return cls._resolve_platform_selectors_with_backup(local_path)[0], cls._resolve_platform_selectors_with_backup(backup_path)[1]
+
     @staticmethod
     def _current_platform_alias() -> str:
         """Return normalized platform alias used by path selectors."""
@@ -172,70 +256,7 @@ class ApplicationsDatabase:
         Syntax:
             [linux:...,mac:...,windows:...,fallback]
         """
-        start = path.find("[")
-        if start == -1:
-            return path
-
-        depth = 0
-        end = -1
-        for idx in range(start, len(path)):
-            if path[idx] == "[":
-                depth += 1
-            elif path[idx] == "]":
-                depth -= 1
-                if depth == 0:
-                    end = idx
-                    break
-
-        if end == -1:
-            return path
-
-        inner = path[start + 1:end]
-        items = cls._split_top_level_items(inner)
-        if len(items) <= 1:
-            return path
-
-        platform_alias = cls._current_platform_alias()
-        platform_keys = {
-            "linux": "linux",
-            "lin": "linux",
-            "mac": "mac",
-            "macos": "mac",
-            "osx": "mac",
-            "darwin": "mac",
-            "windows": "windows",
-            "win": "windows",
-        }
-
-        selected: str | None = None
-        fallback: str | None = None
-        saw_selector_syntax = False
-
-        for item in items:
-            token = item.strip()
-            if ":" in token:
-                key, value = token.split(":", 1)
-                norm_key = platform_keys.get(key.strip().lower())
-                if norm_key is None:
-                    continue
-                saw_selector_syntax = True
-                if norm_key == platform_alias and selected is None:
-                    selected = value.strip()
-            elif fallback is None:
-                fallback = token
-
-        if not saw_selector_syntax and fallback is None:
-            return path
-
-        replacement = selected if selected is not None else fallback
-        if replacement is None:
-            return path
-
-        prefix = path[:start]
-        suffix = path[end + 1:]
-        if replacement.endswith("/") and suffix.startswith("/"):
-            suffix = suffix[1:]
-        return cls._resolve_platform_selectors(f"{prefix}{replacement}{suffix}")
+        return cls._resolve_platform_selectors_with_backup(path)[0]
 
     @classmethod
     def _expand_builtin_path_vars(cls, path: str) -> str:
@@ -295,10 +316,35 @@ class ApplicationsDatabase:
                 expanded.add(candidate)
         return expanded
 
+    @classmethod
+    def _expand_brace_mappings(
+        cls, local_expr: str, backup_expr: str,
+    ) -> set[tuple[str, str]]:
+        """
+        Expand braces for local/backup expressions while preserving mapping intent.
+        """
+        local_expanded = sorted(cls._expand_braces(local_expr))
+        backup_expanded = sorted(cls._expand_braces(backup_expr))
+
+        if len(local_expanded) == 1 and len(backup_expanded) == 1:
+            return {(local_expanded[0], backup_expanded[0])}
+        if len(local_expanded) == len(backup_expanded):
+            return set(zip(local_expanded, backup_expanded))
+        if len(backup_expanded) == 1:
+            return {(local_path, backup_expanded[0]) for local_path in local_expanded}
+        if len(local_expanded) == 1:
+            return {(local_expanded[0], backup_path) for backup_path in backup_expanded}
+
+        raise ValueError(
+            "Unable to pair brace expansions between local and backup paths: "
+            f"{local_expr!r} vs {backup_expr!r}",
+        )
+
     def __init__(self) -> None:
         """Create a ApplicationsDatabase instance."""
         # Build the dict that will contain the properties of each application
         self.apps: dict[str, dict[str, Union[str, set[str]]]] = {}
+        self.app_file_mappings: dict[str, set[tuple[str, str]]] = {}
 
         for config_file in ApplicationsDatabase.get_config_files():
             config: configparser.ConfigParser = configparser.ConfigParser(
@@ -324,19 +370,28 @@ class ApplicationsDatabase:
 
                 # Add the configuration files to sync
                 config_files: set[str] = set()
+                config_mappings: set[tuple[str, str]] = set()
                 self.apps[app_name]["configuration_files"] = config_files
+                self.app_file_mappings[app_name] = config_mappings
                 if config.has_section("configuration_files"):
                     for path in self._read_path_entries_from_section(
                         config_file, "configuration_files",
                     ):
-                        resolved_path = self._resolve_platform_selectors(path)
-                        resolved_path = self._expand_builtin_path_vars(resolved_path)
-                        for expanded_path in self._expand_braces(resolved_path):
-                            if expanded_path.startswith("/"):
+                        local_expr, backup_expr = self._resolve_platform_selectors_with_backup(
+                            path,
+                        )
+                        local_expr = self._expand_builtin_path_vars(local_expr)
+                        backup_expr = self._expand_builtin_path_vars(backup_expr)
+                        for local_path, backup_path in self._expand_brace_mappings(
+                            local_expr, backup_expr,
+                        ):
+                            if local_path.startswith("/") or backup_path.startswith("/"):
                                 raise ValueError(
-                                    f"Unsupported absolute path: {expanded_path}",
+                                    "Unsupported absolute path in mapping: "
+                                    f"{local_path!r} -> {backup_path!r}",
                                 )
-                            config_files.add(expanded_path)
+                            config_files.add(local_path)
+                            config_mappings.add((local_path, backup_path))
 
                 # Add the XDG configuration files to sync
                 home: str = os.path.expanduser("~/")
@@ -351,16 +406,25 @@ class ApplicationsDatabase:
                     for path in self._read_path_entries_from_section(
                         config_file, "xdg_configuration_files",
                     ):
-                        resolved_path = self._resolve_platform_selectors(path)
-                        resolved_path = self._expand_builtin_path_vars(resolved_path)
-                        for expanded_path in self._expand_braces(resolved_path):
-                            if expanded_path.startswith("/"):
+                        local_expr, backup_expr = self._resolve_platform_selectors_with_backup(
+                            path,
+                        )
+                        local_expr = self._expand_builtin_path_vars(local_expr)
+                        backup_expr = self._expand_builtin_path_vars(backup_expr)
+                        for local_relpath, backup_relpath in self._expand_brace_mappings(
+                            local_expr, backup_expr,
+                        ):
+                            if local_relpath.startswith("/") or backup_relpath.startswith("/"):
                                 raise ValueError(
-                                    f"Unsupported absolute path: {expanded_path}",
+                                    "Unsupported absolute path in mapping: "
+                                    f"{local_relpath!r} -> {backup_relpath!r}",
                                 )
-                            xdg_path = os.path.join(xdg_config_home, expanded_path)
-                            xdg_path = xdg_path.replace(home, "")
-                            config_files.add(xdg_path)
+                            local_xdg_path = os.path.join(xdg_config_home, local_relpath)
+                            local_xdg_path = local_xdg_path.replace(home, "")
+                            backup_xdg_path = os.path.join(xdg_config_home, backup_relpath)
+                            backup_xdg_path = backup_xdg_path.replace(home, "")
+                            config_files.add(local_xdg_path)
+                            config_mappings.add((local_xdg_path, backup_xdg_path))
 
     @staticmethod
     def get_config_files() -> set[str]:
@@ -449,6 +513,10 @@ class ApplicationsDatabase:
         value = self.apps[name]["configuration_files"]
         assert isinstance(value, set)
         return value
+
+    def get_file_mappings(self, name: str) -> set[tuple[str, str]]:
+        """Return local->backup path mappings for an application."""
+        return set(self.app_file_mappings[name])
 
     def get_app_names(self) -> set[str]:
         """

@@ -6,6 +6,7 @@ Mackup. Name, files, ...
 """
 
 import os
+from typing import Union
 
 from . import utils
 from .mackup import Mackup
@@ -15,7 +16,11 @@ class ApplicationProfile:
     """Instantiate this class with application specific data."""
 
     def __init__(
-        self, mackup: Mackup, files: set[str], dry_run: bool, verbose: bool,
+        self,
+        mackup: Mackup,
+        files: Union[set[str], set[tuple[str, str]]],
+        dry_run: bool,
+        verbose: bool,
     ) -> None:
         """
         Create an ApplicationProfile instance.
@@ -28,7 +33,18 @@ class ApplicationProfile:
         assert isinstance(files, set)
 
         self.mackup: Mackup = mackup
-        self.files: list[str] = sorted(files)
+        self.file_entries: list[tuple[str, str]]
+        if all(isinstance(item, str) for item in files):
+            raw_files = files
+            assert all(isinstance(item, str) for item in raw_files)
+            self.files = sorted(raw_files)
+            self.file_entries = [(path, path) for path in self.files]
+        else:
+            raw_mappings = files
+            assert all(isinstance(item, tuple) and len(item) == 2 for item in raw_mappings)
+            mappings = {(str(local), str(backup)) for (local, backup) in raw_mappings}
+            self.file_entries = sorted(mappings)
+            self.files = [local for (local, _backup) in self.file_entries]
         self.dry_run: bool = dry_run
         self.verbose: bool = verbose
 
@@ -37,19 +53,20 @@ class ApplicationProfile:
         """Print a user-facing message with terminal color highlighting."""
         print(utils.colorize_message(message))
 
-    def get_filepaths(self, filename: str) -> tuple[str, str]:
+    def get_filepaths(self, local_filename: str, backup_filename: str | None = None) -> tuple[str, str]:
         """
         Get home and mackup filepaths for given file
 
         Args:
-            filename (str)
+            local_filename (str)
+            backup_filename (str|None)
 
         Returns:
             home_filepath, mackup_filepath (str, str)
         """
         return (
-            os.path.join(os.environ["HOME"], filename),
-            os.path.join(self.mackup.mackup_folder, filename),
+            os.path.join(os.environ["HOME"], local_filename),
+            os.path.join(self.mackup.mackup_folder, backup_filename or local_filename),
         )
 
     @staticmethod
@@ -272,8 +289,8 @@ class ApplicationProfile:
         """
         stats: dict[str, int] = {"backed_up": 0, "skipped": 0, "errors": 0}
 
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             # If config_file exists and is a real file/folder
             if (os.path.isfile(home_filepath) or os.path.isdir(home_filepath)):
@@ -367,8 +384,8 @@ class ApplicationProfile:
         """
         stats: dict[str, int] = {"restored": 0, "skipped": 0, "errors": 0}
 
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             # If config_file exists in mackup and is a real file/folder
             if (os.path.isfile(mackup_filepath) or os.path.isdir(mackup_filepath)):
@@ -445,8 +462,8 @@ class ApplicationProfile:
             "skipped": 0, "errors": 0,
         }
 
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             home_exists = os.path.isfile(home_filepath) or os.path.isdir(home_filepath)
             backup_exists = os.path.isfile(mackup_filepath) or os.path.isdir(
@@ -604,8 +621,8 @@ class ApplicationProfile:
         stats: dict[str, int] = {"linked": 0, "skipped": 0}
 
         # For each file used by the application
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             # If the file exists and is not already a link pointing to Mackup
             if (os.path.isfile(home_filepath) or os.path.isdir(home_filepath)) and not (
@@ -692,8 +709,8 @@ class ApplicationProfile:
         stats: dict[str, int] = {"linked": 0, "skipped": 0}
 
         # For each file used by the application
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             # If the file exists and is not already pointing to the mackup file
             # and the folder makes sense on the current platform (Don't sync
@@ -775,8 +792,8 @@ class ApplicationProfile:
         stats: dict[str, int] = {"reverted": 0, "skipped": 0, "warnings": 0}
 
         # For each file used by the application
-        for filename in self.files:
-            (home_filepath, mackup_filepath) = self.get_filepaths(filename)
+        for local_filename, backup_filename in self.file_entries:
+            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             # If the mackup file exists
             if os.path.isfile(mackup_filepath) or os.path.isdir(mackup_filepath):

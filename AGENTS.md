@@ -25,11 +25,18 @@ Use `[...]` to choose a path fragment by platform:
 
 - Syntax: `[linux:...,mac:...,windows:...,fallback]`
 - The last unkeyed item is the fallback.
+- The fallback is also the canonical backup path used in the Mackup storage.
+
+Selector semantics in this fork:
+
+- local path = platform-specific value (or fallback if no matching key)
+- backup path = fallback (or selected path if no fallback is provided)
 
 Examples:
 
 - `@CONFIG@/[mac:Blender,blender]`
 - `@CONFIG@/[mac:Sublime Text 3,sublime-text-3]/Packages/User`
+- `[mac:@CONFIG@/MyApp/config.json,linux:@CONFIG@/myapp/config.json,@CONFIG@/shared/myapp-config.json]`
 
 ### Brace expansion
 
@@ -45,6 +52,7 @@ are present).
 Paths are resolved in this order:
 
 1. Platform selector `[...]`
+   Produces local path and canonical backup path
 2. Built-in variables (`@CONFIG@`, `@DATA@`, `@STATE@`, `@CACHE@`)
 3. Brace expansion `{...}`
 
