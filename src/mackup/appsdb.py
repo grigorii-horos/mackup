@@ -17,7 +17,7 @@ from .constants import APPS_DIR, CUSTOM_APPS_DIR, CUSTOM_APPS_DIR_XDG
 class ApplicationsDatabase:
     """Database containing all the configured applications."""
 
-    _PATH_SECTIONS = {"configuration_files", "xdg_configuration_files"}
+    _PATH_SECTIONS = {"configuration_files"}
     _CROSS_PLATFORM_PATH_VARS = {
         "@CONFIG@": {
             "linux": ".config",
@@ -238,7 +238,6 @@ class ApplicationsDatabase:
                     and not stripped.startswith("#")
                     and not stripped.startswith(";")
                     and "=" not in stripped
-                    and stripped.startswith("[")
                 ):
                     placeholder_index += 1
                     output.append(f"__mackup_path_placeholder_{placeholder_index}__\n")
@@ -396,41 +395,6 @@ class ApplicationsDatabase:
                                 )
                             config_files.add(local_path)
                             config_mappings.add((local_path, backup_path))
-
-                # Add the XDG configuration files to sync
-                home: str = os.path.expanduser("~/")
-                failobj: str = f"{home}.config"
-                xdg_config_home: str = os.environ.get("XDG_CONFIG_HOME", failobj)
-                if not xdg_config_home.startswith(home):
-                    raise ValueError(
-                        f"$XDG_CONFIG_HOME: {xdg_config_home} must be somewhere "
-                        f"within your home directory: {home}",
-                    )
-                if config.has_section("xdg_configuration_files"):
-                    for path in self._read_path_entries_from_section(
-                        config_file, "xdg_configuration_files",
-                    ):
-                        local_expr, backup_expr = self._resolve_platform_selectors_with_backup(
-                            path,
-                        )
-                        local_expr = self._expand_builtin_path_vars(local_expr)
-                        backup_expr = self._expand_builtin_path_vars(
-                            backup_expr, for_backup=True,
-                        )
-                        for local_relpath, backup_relpath in self._expand_brace_mappings(
-                            local_expr, backup_expr,
-                        ):
-                            if local_relpath.startswith("/") or backup_relpath.startswith("/"):
-                                raise ValueError(
-                                    "Unsupported absolute path in mapping: "
-                                    f"{local_relpath!r} -> {backup_relpath!r}",
-                                )
-                            local_xdg_path = os.path.join(xdg_config_home, local_relpath)
-                            local_xdg_path = local_xdg_path.replace(home, "")
-                            backup_xdg_path = os.path.join(xdg_config_home, backup_relpath)
-                            backup_xdg_path = backup_xdg_path.replace(home, "")
-                            config_files.add(local_xdg_path)
-                            config_mappings.add((local_xdg_path, backup_xdg_path))
 
     @staticmethod
     def get_config_files() -> set[str]:

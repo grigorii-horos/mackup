@@ -130,10 +130,9 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
                 "[application]\n"
                 "name = Brace Expand Test\n\n"
                 "[configuration_files]\n"
-                ".config/app/{config1.json,config2.json}\n"
-                ".local/share/{one,two}/state.db\n\n"
-                "[xdg_configuration_files]\n"
-                "myapp/{prefs.toml,theme.toml}\n",
+                "@CONFIG@/app/{config1.json,config2.json}\n"
+                "@DATA@/{one,two}/state.db\n"
+                "@CONFIG@/myapp/{prefs.toml,theme.toml}\n",
             )
 
         old_home = os.environ.get("HOME")

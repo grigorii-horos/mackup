@@ -62,7 +62,7 @@ Paths are resolved in this order:
 ## Config Style (This Fork)
 
 - Prefer `[configuration_files]` only.
-- Do not add `[xdg_configuration_files]`; use `@CONFIG@/...` instead.
+- `xdg_configuration_files` is unsupported in this fork. Use `@CONFIG@/...` in `[configuration_files]`.
 - Prefer a single templated line over duplicated macOS/Linux entries when
   semantics are the same.
 - If macOS path naming differs, prefer a selector inside `@CONFIG@`, e.g.

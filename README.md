@@ -891,7 +891,7 @@ Path templates are resolved in this order:
 
 ### 5. Config style in this fork
 
-- `xdg_configuration_files` entries can be expressed directly in
+- Upstream-style `xdg_configuration_files` is not used in this fork; express entries directly in
   `[configuration_files]` using `@CONFIG@/...`
 - many app definitions in this fork were normalized to use `@CONFIG@`,
   `@DATA@`, and selectors to avoid macOS/Linux duplicates
