@@ -864,7 +864,7 @@ Behavior:
 
 - macOS local path: `@CONFIG@/MyApp/config.json`
 - Linux local path: `@CONFIG@/myapp/config.json`
-- backup path (all platforms): `@CONFIG@/shared/myapp-config.json`
+- backup path (all platforms): canonical Linux path for the fallback, i.e. `.config/shared/myapp-config.json`
 
 ### 3. Built-in cross-platform variables
 
@@ -874,6 +874,12 @@ These are Mackup-specific aliases (not OS environment variables):
 - `@DATA@` -> `.local/share` (Linux) / `Library/Application Support` (macOS) / `AppData/Local` (Windows)
 - `@STATE@` -> `.local/state` (Linux) / `Library/Application Support` (macOS) / `AppData/Local` (Windows)
 - `@CACHE@` -> `.cache` (Linux) / `Library/Caches` (macOS) / `AppData/Local` (Windows)
+
+Important in this fork:
+
+- built-in variables in local paths are resolved for the current OS
+- built-in variables in backup paths are always resolved to Linux canonical paths
+  (e.g. `@CONFIG@` in backup becomes `.config`)
 
 ### 4. Processing order
 

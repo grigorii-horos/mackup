@@ -259,7 +259,9 @@ class ApplicationsDatabase:
         return cls._resolve_platform_selectors_with_backup(path)[0]
 
     @classmethod
-    def _expand_builtin_path_vars(cls, path: str) -> str:
+    def _expand_builtin_path_vars(
+        cls, path: str, *, for_backup: bool = False,
+    ) -> str:
         """
         Expand Mackup-specific built-in path variables.
 
@@ -267,7 +269,7 @@ class ApplicationsDatabase:
         for Mackup application cfg files.
         """
         expanded = path
-        platform_alias = cls._current_platform_alias()
+        platform_alias = "linux" if for_backup else cls._current_platform_alias()
         for token, mapping in cls._CROSS_PLATFORM_PATH_VARS.items():
             value = mapping.get(platform_alias)
             if value is not None:
@@ -381,7 +383,9 @@ class ApplicationsDatabase:
                             path,
                         )
                         local_expr = self._expand_builtin_path_vars(local_expr)
-                        backup_expr = self._expand_builtin_path_vars(backup_expr)
+                        backup_expr = self._expand_builtin_path_vars(
+                            backup_expr, for_backup=True,
+                        )
                         for local_path, backup_path in self._expand_brace_mappings(
                             local_expr, backup_expr,
                         ):
@@ -410,7 +414,9 @@ class ApplicationsDatabase:
                             path,
                         )
                         local_expr = self._expand_builtin_path_vars(local_expr)
-                        backup_expr = self._expand_builtin_path_vars(backup_expr)
+                        backup_expr = self._expand_builtin_path_vars(
+                            backup_expr, for_backup=True,
+                        )
                         for local_relpath, backup_relpath in self._expand_brace_mappings(
                             local_expr, backup_expr,
                         ):

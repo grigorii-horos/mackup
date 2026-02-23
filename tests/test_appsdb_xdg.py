@@ -257,6 +257,22 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
                 == "AppData/Local/tool/data.db"
             )
 
+    def test_cross_platform_builtin_variables_expand_to_linux_for_backup(self):
+        """Backup path expansion should use Linux canonical values."""
+        with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars(
+                    "@CONFIG@/app/config.json", for_backup=True,
+                )
+                == ".config/app/config.json"
+            )
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars(
+                    "@DATA@/app/data.json", for_backup=True,
+                )
+                == ".local/share/app/data.json"
+            )
+
     def test_applications_database_resolves_selectors_before_expanding_braces(self):
         """Selectors are resolved first, then braces are expanded."""
         temp_home = tempfile.mkdtemp()
@@ -328,6 +344,17 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
                 mappings = db.get_file_mappings("mapping-test")
                 assert (
                     ".config/myapp/config.json",
+                    ".local/share/shared/myapp-config.json",
+                ) in mappings
+
+            with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+                db = ApplicationsDatabase()
+                assert "Library/Application Support/MyApp/config.json" in db.get_files(
+                    "mapping-test",
+                )
+                mappings = db.get_file_mappings("mapping-test")
+                assert (
+                    "Library/Application Support/MyApp/config.json",
                     ".local/share/shared/myapp-config.json",
                 ) in mappings
         finally:

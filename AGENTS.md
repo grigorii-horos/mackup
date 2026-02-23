@@ -31,6 +31,8 @@ Selector semantics in this fork:
 
 - local path = platform-specific value (or fallback if no matching key)
 - backup path = fallback (or selected path if no fallback is provided)
+- built-in variables in backup paths are resolved to Linux canonical values
+  (`@CONFIG@ -> .config`, `@DATA@ -> .local/share`, etc.)
 
 Examples:
 
@@ -54,6 +56,7 @@ Paths are resolved in this order:
 1. Platform selector `[...]`
    Produces local path and canonical backup path
 2. Built-in variables (`@CONFIG@`, `@DATA@`, `@STATE@`, `@CACHE@`)
+   Local path uses current OS mapping; backup path uses Linux canonical mapping
 3. Brace expansion `{...}`
 
 ## Config Style (This Fork)
