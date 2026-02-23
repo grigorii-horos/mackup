@@ -467,20 +467,44 @@ class ApplicationProfile:
 
                 # For directories we merge by entry mtime, not whole-tree mtime.
                 if os.path.isdir(home_filepath) and os.path.isdir(mackup_filepath):
-                    if self.verbose:
-                        self._print(
-                            f"Synchronizing\n  {home_filepath}\n  with\n  {mackup_filepath} ...",
-                        )
-
                     if self.dry_run:
-                        stats["synchronized"] += 1
+                        home_to_backup_changes = self.sync_directory_entries_one_way(
+                            home_filepath, mackup_filepath, source_wins=True, dry_run=True,
+                        )
+                        backup_to_home_changes = self.sync_directory_entries_one_way(
+                            mackup_filepath, home_filepath, source_wins=True, dry_run=True,
+                        )
+                        dir_changed = home_to_backup_changes or backup_to_home_changes
+                        if self.verbose:
+                            if dir_changed:
+                                self._print(
+                                    f"Synchronizing\n  {home_filepath}\n  with\n  {mackup_filepath} ...",
+                                )
+                            else:
+                                self._print(
+                                    f"Skipping {home_filepath}\n"
+                                    f"  already in sync with\n  {mackup_filepath}",
+                                )
+                        if dir_changed:
+                            stats["synchronized"] += 1
+                        else:
+                            stats["skipped"] += 1
                         continue
 
                     try:
                         dir_changed = self.sync_directory_entries(home_filepath, mackup_filepath)
                         if dir_changed:
+                            if self.verbose:
+                                self._print(
+                                    f"Synchronizing\n  {home_filepath}\n  with\n  {mackup_filepath} ...",
+                                )
                             stats["synchronized"] += 1
                         else:
+                            if self.verbose:
+                                self._print(
+                                    f"Skipping {home_filepath}\n"
+                                    f"  already in sync with\n  {mackup_filepath}",
+                                )
                             stats["skipped"] += 1
                     except PermissionError as e:
                         self._print(
@@ -500,6 +524,9 @@ class ApplicationProfile:
                 action = "backup"
             elif backup_exists:
                 action = "restore"
+            else:
+                # Missing on both sides: no-op, do not count as a user-visible skip.
+                continue
 
             if action is None:
                 if self.verbose:

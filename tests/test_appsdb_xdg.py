@@ -1,7 +1,10 @@
 """Tests for ApplicationsDatabase XDG support."""
 
 import os
+import shutil
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from mackup.appsdb import ApplicationsDatabase
 
@@ -111,6 +114,245 @@ class TestApplicationsDatabaseXDG(unittest.TestCase):
         # Priority app should load the legacy version
         assert "priority-test-app" in db.get_app_names()
         assert db.get_name("priority-test-app") == "Priority Test App Legacy"
+
+    def test_applications_database_expands_braces_in_config_paths(self):
+        """Brace groups in app cfg paths should expand into multiple files."""
+        temp_home = tempfile.mkdtemp()
+        temp_xdg = os.path.join(temp_home, ".config")
+        legacy_apps_dir = os.path.join(temp_home, ".mackup")
+        xdg_apps_dir = os.path.join(temp_xdg, "mackup", "applications")
+        os.makedirs(legacy_apps_dir, exist_ok=True)
+        os.makedirs(xdg_apps_dir, exist_ok=True)
+
+        cfg_path = os.path.join(legacy_apps_dir, "brace-expand-test.cfg")
+        with open(cfg_path, "w") as f:
+            f.write(
+                "[application]\n"
+                "name = Brace Expand Test\n\n"
+                "[configuration_files]\n"
+                ".config/app/{config1.json,config2.json}\n"
+                ".local/share/{one,two}/state.db\n\n"
+                "[xdg_configuration_files]\n"
+                "myapp/{prefs.toml,theme.toml}\n",
+            )
+
+        old_home = os.environ.get("HOME")
+        old_xdg = os.environ.get("XDG_CONFIG_HOME")
+        try:
+            os.environ["HOME"] = temp_home
+            os.environ["XDG_CONFIG_HOME"] = temp_xdg
+
+            db = ApplicationsDatabase()
+            files = db.get_files("brace-expand-test")
+
+            assert ".config/app/config1.json" in files
+            assert ".config/app/config2.json" in files
+            assert ".local/share/one/state.db" in files
+            assert ".local/share/two/state.db" in files
+            assert ".config/myapp/prefs.toml" in files
+            assert ".config/myapp/theme.toml" in files
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old_xdg
+            shutil.rmtree(temp_home)
+
+    def test_platform_selector_resolves_for_current_platform(self):
+        """Platform selector syntax should choose the platform-specific path."""
+        with patch("mackup.appsdb.platform.system", return_value="Linux"):
+            assert (
+                ApplicationsDatabase._resolve_platform_selectors(
+                    "[linux:.config/,mac:Library/Application Support,windows:AppData/Roaming,.config]/app/config2.json",
+                )
+                == ".config/app/config2.json"
+            )
+        with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+            assert (
+                ApplicationsDatabase._resolve_platform_selectors(
+                    "[linux:.config/,mac:Library/Application Support,windows:AppData/Roaming,.config]/app/config2.json",
+                )
+                == "Library/Application Support/app/config2.json"
+            )
+        with patch("mackup.appsdb.platform.system", return_value="Windows"):
+            assert (
+                ApplicationsDatabase._resolve_platform_selectors(
+                    "[linux:.config/,mac:Library/Application Support,windows:AppData/Roaming,.config]/app/config2.json",
+                )
+                == "AppData/Roaming/app/config2.json"
+            )
+
+    def test_platform_selector_uses_unkeyed_fallback(self):
+        """Selector should use the last unkeyed item as fallback."""
+        with patch("mackup.appsdb.platform.system", return_value="Linux"):
+            assert (
+                ApplicationsDatabase._resolve_platform_selectors(
+                    "[mac:Library/Application Support/app/mac.conf,windows:AppData/Roaming/app/windows.conf,.config/app/other.conf]",
+                )
+                == ".config/app/other.conf"
+            )
+
+    def test_cross_platform_builtin_variables_expand(self):
+        """Generic built-in vars should map to platform-specific directories."""
+        with patch("mackup.appsdb.platform.system", return_value="Linux"):
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars(
+                    "@CONFIG@/app/config.json",
+                )
+                == ".config/app/config.json"
+            )
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars("@CACHE@/tool/cache.db")
+                == ".cache/tool/cache.db"
+            )
+
+        with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars(
+                    "@CONFIG@/app/config.json",
+                )
+                == "Library/Application Support/app/config.json"
+            )
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars("@CACHE@/tool/cache.db")
+                == "Library/Caches/tool/cache.db"
+            )
+
+        with patch("mackup.appsdb.platform.system", return_value="Windows"):
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars(
+                    "@CONFIG@/app/config.json",
+                )
+                == "AppData/Roaming/app/config.json"
+            )
+            assert (
+                ApplicationsDatabase._expand_builtin_path_vars("@DATA@/tool/data.db")
+                == "AppData/Local/tool/data.db"
+            )
+
+    def test_applications_database_resolves_selectors_before_expanding_braces(self):
+        """Selectors are resolved first, then braces are expanded."""
+        temp_home = tempfile.mkdtemp()
+        temp_xdg = os.path.join(temp_home, ".config")
+        legacy_apps_dir = os.path.join(temp_home, ".mackup")
+        os.makedirs(legacy_apps_dir, exist_ok=True)
+
+        cfg_path = os.path.join(legacy_apps_dir, "platform-selector-test.cfg")
+        with open(cfg_path, "w") as f:
+            f.write(
+                "[application]\n"
+                "name = Platform Selector Test\n\n"
+                "[configuration_files]\n"
+                "[linux:.config/app/{linux.conf,common.conf},mac:Library/Application Support/app/{mac.conf,common.conf},windows:AppData/Roaming/app/{windows.conf,common.conf},.config/app/other.conf]\n",
+            )
+
+        old_home = os.environ.get("HOME")
+        old_xdg = os.environ.get("XDG_CONFIG_HOME")
+        try:
+            os.environ["HOME"] = temp_home
+            os.environ["XDG_CONFIG_HOME"] = temp_xdg
+
+            with patch("mackup.appsdb.platform.system", return_value="Linux"):
+                db = ApplicationsDatabase()
+                files = db.get_files("platform-selector-test")
+                assert ".config/app/linux.conf" in files
+                assert ".config/app/common.conf" in files
+                assert ".config/app/other.conf" not in files
+                assert "Library/Application Support/app/mac.conf" not in files
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old_xdg
+            shutil.rmtree(temp_home)
+
+    def test_applications_database_supports_builtin_vars_with_selectors_and_braces(self):
+        """Built-in vars should work after selectors and before brace expansion."""
+        temp_home = tempfile.mkdtemp()
+        temp_xdg = os.path.join(temp_home, ".config")
+        legacy_apps_dir = os.path.join(temp_home, ".mackup")
+        os.makedirs(legacy_apps_dir, exist_ok=True)
+
+        cfg_path = os.path.join(legacy_apps_dir, "builtin-vars-test.cfg")
+        with open(cfg_path, "w") as f:
+            f.write(
+                "[application]\n"
+                "name = Builtin Vars Test\n\n"
+                "[configuration_files]\n"
+                "[linux:@CONFIG@/demo/{a,b}.json,mac:Library/Application Support/demo/{a,b}.json,@DATA@/demo/fallback.json]\n",
+            )
+
+        old_home = os.environ.get("HOME")
+        old_xdg = os.environ.get("XDG_CONFIG_HOME")
+        try:
+            os.environ["HOME"] = temp_home
+            os.environ["XDG_CONFIG_HOME"] = temp_xdg
+
+            with patch("mackup.appsdb.platform.system", return_value="Linux"):
+                db = ApplicationsDatabase()
+                files = db.get_files("builtin-vars-test")
+                assert ".config/demo/a.json" in files
+                assert ".config/demo/b.json" in files
+                assert ".local/share/demo/fallback.json" not in files
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old_xdg
+            shutil.rmtree(temp_home)
+
+    def test_applications_database_supports_cross_platform_builtin_vars(self):
+        """Cross-platform vars should resolve without requiring [] selectors."""
+        temp_home = tempfile.mkdtemp()
+        temp_xdg = os.path.join(temp_home, ".config")
+        legacy_apps_dir = os.path.join(temp_home, ".mackup")
+        os.makedirs(legacy_apps_dir, exist_ok=True)
+
+        cfg_path = os.path.join(legacy_apps_dir, "cross-platform-vars-test.cfg")
+        with open(cfg_path, "w") as f:
+            f.write(
+                "[application]\n"
+                "name = Cross Platform Vars Test\n\n"
+                "[configuration_files]\n"
+                "@CONFIG@/demo/{a,b}.json\n"
+                "@CACHE@/demo/cache.db\n",
+            )
+
+        old_home = os.environ.get("HOME")
+        old_xdg = os.environ.get("XDG_CONFIG_HOME")
+        try:
+            os.environ["HOME"] = temp_home
+            os.environ["XDG_CONFIG_HOME"] = temp_xdg
+
+            with patch("mackup.appsdb.platform.system", return_value="Darwin"):
+                db = ApplicationsDatabase()
+                files = db.get_files("cross-platform-vars-test")
+                assert "Library/Application Support/demo/a.json" in files
+                assert "Library/Application Support/demo/b.json" in files
+                assert "Library/Caches/demo/cache.db" in files
+                assert ".config/demo/a.json" not in files
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old_xdg
+            shutil.rmtree(temp_home)
 
 
 if __name__ == "__main__":

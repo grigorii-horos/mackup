@@ -7,13 +7,293 @@ data from the Mackup Database (files).
 
 import configparser
 import os
+import platform
 from typing import Union
 
+from . import constants
 from .constants import APPS_DIR, CUSTOM_APPS_DIR, CUSTOM_APPS_DIR_XDG
 
 
 class ApplicationsDatabase:
     """Database containing all the configured applications."""
+
+    _PATH_SECTIONS = {"configuration_files", "xdg_configuration_files"}
+    _CROSS_PLATFORM_PATH_VARS = {
+        "@CONFIG@": {
+            "linux": ".config",
+            "mac": "Library/Application Support",
+            "windows": "AppData/Roaming",
+        },
+        "@DATA@": {
+            "linux": ".local/share",
+            "mac": "Library/Application Support",
+            "windows": "AppData/Local",
+        },
+        "@STATE@": {
+            "linux": ".local/state",
+            "mac": "Library/Application Support",
+            "windows": "AppData/Local",
+        },
+        "@CACHE@": {
+            "linux": ".cache",
+            "mac": "Library/Caches",
+            "windows": "AppData/Local",
+        },
+    }
+
+    @staticmethod
+    def _split_top_level_items(value: str) -> list[str]:
+        """Split comma-separated items, honoring nested braces/selectors."""
+        parts: list[str] = []
+        current: list[str] = []
+        brace_depth = 0
+        bracket_depth = 0
+        for char in value:
+            if char == "," and brace_depth == 0 and bracket_depth == 0:
+                parts.append("".join(current))
+                current = []
+                continue
+            if char == "{":
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+            elif char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
+            current.append(char)
+        parts.append("".join(current))
+        return parts
+
+    @staticmethod
+    def _current_platform_alias() -> str:
+        """Return normalized platform alias used by path selectors."""
+        system_name = platform.system()
+        if system_name == constants.PLATFORM_DARWIN:
+            return "mac"
+        if system_name == constants.PLATFORM_WINDOWS:
+            return "windows"
+        return "linux"
+
+    @classmethod
+    def _read_path_entries_from_section(cls, config_file: str, section: str) -> list[str]:
+        """
+        Read raw path entries from a cfg section.
+
+        This bypasses ConfigParser limitations for entries that begin with '[',
+        which we use for platform selectors.
+        """
+        entries: list[str] = []
+        current_section: str | None = None
+        with open(config_file, encoding="utf-8") as f:
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+                    continue
+
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    section_name = stripped[1:-1].strip()
+                    # Selector lines can also start/end with brackets; only treat as
+                    # a new section if it looks like a section header.
+                    is_header = (
+                        section_name
+                        and ":" not in section_name
+                        and "," not in section_name
+                        and "/" not in section_name
+                        and "{" not in section_name
+                        and "}" not in section_name
+                    )
+                    if is_header:
+                        current_section = section_name
+                        continue
+
+                if current_section != section:
+                    continue
+
+                # Keep parity with existing no-value option semantics: path lines only.
+                if "=" in stripped:
+                    continue
+                entries.append(stripped)
+        return entries
+
+    @classmethod
+    def _read_sanitized_config_text_for_parser(cls, config_file: str) -> str:
+        """
+        Return cfg text sanitized for ConfigParser.
+
+        Path entries in path sections may start with '[' due to platform
+        selectors; ConfigParser interprets them as section headers. We replace
+        such lines with placeholders for parser consumption only.
+        """
+        output: list[str] = []
+        current_section: str | None = None
+        placeholder_index = 0
+
+        with open(config_file, encoding="utf-8") as f:
+            for raw_line in f:
+                stripped = raw_line.strip()
+
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    section_name = stripped[1:-1].strip()
+                    is_header = (
+                        section_name
+                        and ":" not in section_name
+                        and "," not in section_name
+                        and "/" not in section_name
+                        and "{" not in section_name
+                        and "}" not in section_name
+                    )
+                    if is_header:
+                        current_section = section_name
+                        output.append(raw_line)
+                        continue
+
+                if (
+                    current_section in cls._PATH_SECTIONS
+                    and stripped
+                    and not stripped.startswith("#")
+                    and not stripped.startswith(";")
+                    and "=" not in stripped
+                    and stripped.startswith("[")
+                ):
+                    placeholder_index += 1
+                    output.append(f"__mackup_path_placeholder_{placeholder_index}__\n")
+                    continue
+
+                output.append(raw_line)
+
+        return "".join(output)
+
+    @classmethod
+    def _resolve_platform_selectors(cls, path: str) -> str:
+        """
+        Resolve platform-specific selectors in square brackets.
+
+        Syntax:
+            [linux:...,mac:...,windows:...,fallback]
+        """
+        start = path.find("[")
+        if start == -1:
+            return path
+
+        depth = 0
+        end = -1
+        for idx in range(start, len(path)):
+            if path[idx] == "[":
+                depth += 1
+            elif path[idx] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = idx
+                    break
+
+        if end == -1:
+            return path
+
+        inner = path[start + 1:end]
+        items = cls._split_top_level_items(inner)
+        if len(items) <= 1:
+            return path
+
+        platform_alias = cls._current_platform_alias()
+        platform_keys = {
+            "linux": "linux",
+            "lin": "linux",
+            "mac": "mac",
+            "macos": "mac",
+            "osx": "mac",
+            "darwin": "mac",
+            "windows": "windows",
+            "win": "windows",
+        }
+
+        selected: str | None = None
+        fallback: str | None = None
+        saw_selector_syntax = False
+
+        for item in items:
+            token = item.strip()
+            if ":" in token:
+                key, value = token.split(":", 1)
+                norm_key = platform_keys.get(key.strip().lower())
+                if norm_key is None:
+                    continue
+                saw_selector_syntax = True
+                if norm_key == platform_alias and selected is None:
+                    selected = value.strip()
+            elif fallback is None:
+                fallback = token
+
+        if not saw_selector_syntax and fallback is None:
+            return path
+
+        replacement = selected if selected is not None else fallback
+        if replacement is None:
+            return path
+
+        prefix = path[:start]
+        suffix = path[end + 1:]
+        if replacement.endswith("/") and suffix.startswith("/"):
+            suffix = suffix[1:]
+        return cls._resolve_platform_selectors(f"{prefix}{replacement}{suffix}")
+
+    @classmethod
+    def _expand_builtin_path_vars(cls, path: str) -> str:
+        """
+        Expand Mackup-specific built-in path variables.
+
+        These are not environment variables; they are static aliases intended
+        for Mackup application cfg files.
+        """
+        expanded = path
+        platform_alias = cls._current_platform_alias()
+        for token, mapping in cls._CROSS_PLATFORM_PATH_VARS.items():
+            value = mapping.get(platform_alias)
+            if value is not None:
+                expanded = expanded.replace(token, value)
+        return expanded
+
+    @classmethod
+    def _expand_braces(cls, path: str) -> set[str]:
+        """
+        Expand simple shell-like brace groups in a path.
+
+        Example:
+            .config/app/{a,b}.json -> {'.config/app/a.json', '.config/app/b.json'}
+
+        If braces are unmatched or contain no top-level comma, the path is
+        returned unchanged.
+        """
+        start = path.find("{")
+        if start == -1:
+            return {path}
+
+        depth = 0
+        end = -1
+        for idx in range(start, len(path)):
+            if path[idx] == "{":
+                depth += 1
+            elif path[idx] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = idx
+                    break
+
+        if end == -1:
+            return {path}
+
+        inner = path[start + 1:end]
+        items = cls._split_top_level_items(inner)
+        if len(items) <= 1:
+            return {path}
+
+        prefix = path[:start]
+        suffix = path[end + 1:]
+        expanded: set[str] = set()
+        for item in items:
+            for candidate in cls._expand_braces(f"{prefix}{item}{suffix}"):
+                expanded.add(candidate)
+        return expanded
 
     def __init__(self) -> None:
         """Create a ApplicationsDatabase instance."""
@@ -28,7 +308,8 @@ class ApplicationsDatabase:
             # Needed to not lowercase the configuration_files in the ini files
             config.optionxform = str  # type: ignore
 
-            if config.read(config_file):
+            config_text = self._read_sanitized_config_text_for_parser(config_file)
+            if config.read_string(config_text, source=config_file) is None:
                 # Get the filename without the directory name
                 filename: str = os.path.basename(config_file)
                 # The app name is the cfg filename with the extension
@@ -45,12 +326,17 @@ class ApplicationsDatabase:
                 config_files: set[str] = set()
                 self.apps[app_name]["configuration_files"] = config_files
                 if config.has_section("configuration_files"):
-                    for path in config.options("configuration_files"):
-                        if path.startswith("/"):
-                            raise ValueError(
-                                f"Unsupported absolute path: {path}",
-                            )
-                        config_files.add(path)
+                    for path in self._read_path_entries_from_section(
+                        config_file, "configuration_files",
+                    ):
+                        resolved_path = self._resolve_platform_selectors(path)
+                        resolved_path = self._expand_builtin_path_vars(resolved_path)
+                        for expanded_path in self._expand_braces(resolved_path):
+                            if expanded_path.startswith("/"):
+                                raise ValueError(
+                                    f"Unsupported absolute path: {expanded_path}",
+                                )
+                            config_files.add(expanded_path)
 
                 # Add the XDG configuration files to sync
                 home: str = os.path.expanduser("~/")
@@ -62,14 +348,19 @@ class ApplicationsDatabase:
                         f"within your home directory: {home}",
                     )
                 if config.has_section("xdg_configuration_files"):
-                    for path in config.options("xdg_configuration_files"):
-                        if path.startswith("/"):
-                            raise ValueError(
-                                f"Unsupported absolute path: {path}",
-                            )
-                        xdg_path = os.path.join(xdg_config_home, path)
-                        xdg_path = xdg_path.replace(home, "")
-                        config_files.add(xdg_path)
+                    for path in self._read_path_entries_from_section(
+                        config_file, "xdg_configuration_files",
+                    ):
+                        resolved_path = self._resolve_platform_selectors(path)
+                        resolved_path = self._expand_builtin_path_vars(resolved_path)
+                        for expanded_path in self._expand_braces(resolved_path):
+                            if expanded_path.startswith("/"):
+                                raise ValueError(
+                                    f"Unsupported absolute path: {expanded_path}",
+                                )
+                            xdg_path = os.path.join(xdg_config_home, expanded_path)
+                            xdg_path = xdg_path.replace(home, "")
+                            config_files.add(xdg_path)
 
     @staticmethod
     def get_config_files() -> set[str]:

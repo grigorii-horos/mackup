@@ -69,6 +69,7 @@ def colorize_message(message: str) -> str:
     """Colorize user-facing terminal messages by status prefix."""
     styles: tuple[tuple[str, str, bool], ...] = (
         ("Error:", AnsiColor.RED, True),
+        ("Failed", AnsiColor.RED, True),
         ("Warning:", AnsiColor.YELLOW, True),
         ("Backed up", AnsiColor.CYAN, False),
         ("Backing up", AnsiColor.CYAN, False),

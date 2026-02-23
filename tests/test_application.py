@@ -283,7 +283,7 @@ class TestApplicationProfile(unittest.TestCase):
             mackup=self.mock_mackup,
             files=self.test_files,
             dry_run=True,
-            verbose=False,
+            verbose=True,
         )
 
         # Create a test file in the home directory
@@ -320,7 +320,7 @@ class TestApplicationProfile(unittest.TestCase):
             mackup=self.mock_mackup,
             files=self.test_files,
             dry_run=True,
-            verbose=False,
+            verbose=True,
         )
 
         # Create a test file in the mackup directory
@@ -504,6 +504,13 @@ class TestApplicationProfile(unittest.TestCase):
 
     def test_link_uninstall_mackup_points_correctly(self):
         """Test link_uninstall proceeds when home link points to mackup file."""
+        app_profile_verbose = ApplicationProfile(
+            mackup=self.mock_mackup,
+            files=self.test_files,
+            dry_run=False,
+            verbose=True,
+        )
+
         # Create a test file
         test_file = ".testfile"
         mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
@@ -524,7 +531,7 @@ class TestApplicationProfile(unittest.TestCase):
             sys.stdout = captured_output
 
             # Call the method
-            self.app_profile.link_uninstall()
+            app_profile_verbose.link_uninstall()
 
             # Restore stdout
             sys.stdout = sys.__stdout__
@@ -570,9 +577,9 @@ class TestApplicationProfile(unittest.TestCase):
             mock_delete.assert_not_called()
             mock_copy.assert_not_called()
 
-            # Verify that the operation is reported as skipped (non-verbose)
+            # Non-verbose mode should not print skip details.
             output = captured_output.getvalue()
-            assert "Skipping" in output
+            assert output == ""
 
         # Verify the symlink still exists and points to mackup file
         assert os.path.islink(home_filepath)
@@ -643,6 +650,13 @@ class TestApplicationProfile(unittest.TestCase):
 
     def test_copy_files_to_mackup_folder_backs_up_symlink_to_different_location(self):
         """Test that backup still works for symlinks pointing elsewhere (not mackup)."""
+        app_profile_verbose = ApplicationProfile(
+            mackup=self.mock_mackup,
+            files=self.test_files,
+            dry_run=False,
+            verbose=True,
+        )
+
         # Create a test file
         test_file = ".testfile"
         mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
@@ -663,7 +677,7 @@ class TestApplicationProfile(unittest.TestCase):
             sys.stdout = captured_output
 
             # Call the method
-            self.app_profile.copy_files_to_mackup_folder()
+            app_profile_verbose.copy_files_to_mackup_folder()
 
             # Restore stdout
             sys.stdout = sys.__stdout__
@@ -953,8 +967,53 @@ class TestApplicationProfile(unittest.TestCase):
 
         assert int(os.path.getmtime(home_dirpath)) == 300
 
+    def test_sync_files_verbose_skips_synced_directory_without_sync_message(self):
+        """Verbose sync should show skip (not synchronizing) when directory is already in sync."""
+        app_profile_verbose = ApplicationProfile(
+            mackup=self.mock_mackup,
+            files={".testfolder"},
+            dry_run=False,
+            verbose=True,
+        )
+
+        test_dir = ".testfolder"
+        home_dirpath = os.path.join(self.temp_home, test_dir)
+        mackup_dirpath = os.path.join(self.mock_mackup.mackup_folder, test_dir)
+        os.makedirs(home_dirpath)
+        os.makedirs(mackup_dirpath)
+
+        home_file = os.path.join(home_dirpath, "same.txt")
+        mackup_file = os.path.join(mackup_dirpath, "same.txt")
+        with open(home_file, "w") as f:
+            f.write("same")
+        with open(mackup_file, "w") as f:
+            f.write("same")
+
+        os.utime(home_file, (100, 100))
+        os.utime(mackup_file, (100, 100))
+        os.utime(home_dirpath, (100, 100))
+        os.utime(mackup_dirpath, (100, 100))
+
+        captured_output = StringIO()
+        sys.stdout = captured_output
+        try:
+            app_profile_verbose.sync_files()
+        finally:
+            sys.stdout = sys.__stdout__
+
+        output = captured_output.getvalue()
+        assert "Synchronizing" not in output
+        assert "Skipping" in output
+        assert "already in sync with" in output
+
     def test_sync_files_logs_single_action_per_file(self):
         """Test sync emits one action line per file (no backup+restore double log)."""
+        app_profile_verbose = ApplicationProfile(
+            mackup=self.mock_mackup,
+            files=self.test_files,
+            dry_run=False,
+            verbose=True,
+        )
         test_file = ".testfile"
         home_filepath = os.path.join(self.temp_home, test_file)
         mackup_filepath = os.path.join(self.mock_mackup.mackup_folder, test_file)
@@ -970,13 +1029,32 @@ class TestApplicationProfile(unittest.TestCase):
         captured_output = StringIO()
         sys.stdout = captured_output
         try:
-            self.app_profile.sync_files()
+            app_profile_verbose.sync_files()
         finally:
             sys.stdout = sys.__stdout__
 
         output = captured_output.getvalue()
-        assert "Backing up .testfile ..." in output
-        assert "Restoring .testfile ..." not in output
+        assert "Backing up" in output
+        assert home_filepath in output
+        assert mackup_filepath in output
+        assert "Restoring\n" not in output
+
+    def test_sync_files_ignores_missing_file_on_both_sides(self):
+        """Sync should not count a file missing in both home and backup as skipped."""
+        app_profile = ApplicationProfile(
+            mackup=self.mock_mackup,
+            files={".missing-file"},
+            dry_run=False,
+            verbose=False,
+        )
+
+        stats = app_profile.sync_files()
+
+        assert stats["backed_up"] == 0
+        assert stats["restored"] == 0
+        assert stats["synchronized"] == 0
+        assert stats["skipped"] == 0
+        assert stats["errors"] == 0
 
 
 if __name__ == "__main__":

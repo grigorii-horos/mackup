@@ -68,13 +68,19 @@ def bold(text: str) -> str:
     return ColorFormatCodes.BOLD + text + ColorFormatCodes.NORMAL
 
 
-def get_action_label(stats: dict[str, int]) -> str:
+def get_action_label(stats: dict[str, int]) -> Optional[str]:
     """Return a past-tense action label describing what happened."""
+    if not any(stats.values()):
+        return None
+
     backed_up = stats.get("backed_up", 0)
     restored = stats.get("restored", 0)
     synchronized = stats.get("synchronized", 0)
     linked = stats.get("linked", 0)
     reverted = stats.get("reverted", 0)
+    errors = stats.get("errors", 0)
+    if errors > 0:
+        return "Failed"
     if reverted > 0:
         return "Reverted"
     if linked > 0:
@@ -118,6 +124,8 @@ def main() -> None:
 
     def print_app_result(stats: dict[str, int], app_name: str, pretty_name: str) -> None:
         action = get_action_label(stats)
+        if action is None:
+            return
         print(utils.colorize_message(f"{action} {pretty_name}"))
 
     # If we want to answer mackup with "yes" for each question

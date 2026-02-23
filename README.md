@@ -26,6 +26,7 @@ Backup and keep your application settings in sync.
   - [Supported Applications](#supported-applications)
   - [Can you support application X](#can-you-support-application-x)
   - [Personalization \& configuration](#personalization--configuration)
+  - [Fork Additions](#fork-additions)
   - [Why did you do this](#why-did-you-do-this)
   - [What platforms are supported](#what-platforms-are-supported)
   - [What's up with the weird name](#whats-up-with-the-weird-name)
@@ -812,6 +813,68 @@ Or some personal files you want to sync, e.g. various config files in a `~/.conf
 directory or your personal `~/.gitignore`?
 
 - Create a `~/.mackup` directory to [sync an application or any file or directory](doc#add-support-for-an-application-or-any-file-or-directory)
+
+## Fork Additions
+
+This fork adds path templating for application config definitions (`*.cfg` in
+`src/mackup/applications`) to reduce duplication and simplify cross-platform
+entries.
+
+### 1. Brace expansion (`{...}`)
+
+You can define multiple paths in one line:
+
+```ini
+[configuration_files]
+@CONFIG@/Code/User/{snippets,keybindings.json,settings.json}
+```
+
+This expands to one entry per item (cartesian product if multiple brace groups
+are used).
+
+### 2. Platform selector (`[...]`)
+
+You can choose different path fragments per platform:
+
+```ini
+[configuration_files]
+@CONFIG@/[mac:Blender,blender]
+```
+
+Another example with a full-path fallback:
+
+```ini
+[configuration_files]
+[linux:@CONFIG@/myapp/linux.conf,mac:@CONFIG@/MyApp/mac.conf,windows:@CONFIG@/MyApp/windows.conf,@CONFIG@/myapp/other.conf]
+```
+
+- `linux:`, `mac:`, `windows:` are supported keys
+- the last unkeyed item is the fallback
+
+### 3. Built-in cross-platform variables
+
+These are Mackup-specific aliases (not OS environment variables):
+
+- `@CONFIG@` -> `.config` (Linux) / `Library/Application Support` (macOS) / `AppData/Roaming` (Windows)
+- `@DATA@` -> `.local/share` (Linux) / `Library/Application Support` (macOS) / `AppData/Local` (Windows)
+- `@STATE@` -> `.local/state` (Linux) / `Library/Application Support` (macOS) / `AppData/Local` (Windows)
+- `@CACHE@` -> `.cache` (Linux) / `Library/Caches` (macOS) / `AppData/Local` (Windows)
+
+### 4. Processing order
+
+Path templates are resolved in this order:
+
+1. Platform selector `[...]`
+2. Built-in variables (`@CONFIG@`, `@DATA@`, `@STATE@`, `@CACHE@`)
+3. Brace expansion `{...}`
+
+### 5. Config style in this fork
+
+- `xdg_configuration_files` entries can be expressed directly in
+  `[configuration_files]` using `@CONFIG@/...`
+- many app definitions in this fork were normalized to use `@CONFIG@`,
+  `@DATA@`, and selectors to avoid macOS/Linux duplicates
+  (for example VS Code-family configs)
 
 ## Why did you do this
 
