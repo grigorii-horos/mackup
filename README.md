@@ -17,10 +17,6 @@ Backup and keep your application settings in sync.
   - [Usage](#usage)
   - [What does it do](#what-does-it-do)
     - [Sync mode](#sync-mode)
-    - [Link mode](#link-mode)
-      - [`mackup link install`](#mackup-link-install)
-      - [`mackup link`](#mackup-link)
-      - [`mackup link uninstall`](#mackup-link-uninstall)
   - [Supported Storages](#supported-storages)
   - [Unsupported Storages](#unsupported-storages)
   - [Supported Applications](#supported-applications)
@@ -83,23 +79,6 @@ Synchronize your application files between your home folder and the Mackup folde
 Remove a managed config path locally and from the Mackup folder, and record the
 deletion so future syncs remove it on other machines too.
 
-`mackup link install`
-
-Move your local config files into the Mackup folder,
-and link them to their original place.
-
-$${\color{red}warning}$$ _the `link` strategy [doesn't work correctly on macOS](#link-mode)_
-
-`mackup link`
-
-On another workstation, links local config files from the Mackup folder.
-
-`mackup link uninstall`
-
-Copy back any synced config file to its original place.
-Removes the links and copies config files from the Mackup folder back into your
-home.
-
 `mackup list`
 
 Display the list of applications supported by Mackup.
@@ -116,7 +95,7 @@ files are transferred).
 
 Mackup makes setting up the environment easy and simple.
 
-There are 2 modes of operations: sync mode and link mode.
+Mackup uses sync mode.
 
 ### Sync mode
 
@@ -128,67 +107,6 @@ It is covered by the commands:
 
 - `mackup sync`
 - `mackup rm <path>`
-
-### Link mode
-
-> [!WARNING]
-> If you are using Mackup on a current version of macOS, link mode will BREAK
-  YOUR PREFERENCES. macOS Sonoma (macOS 14) and later don't support symlinked
-  preferences, see [issue #2035](https://github.com/lra/mackup/issues/2035) for
-  additional information. [PR #2085](<https://github.com/lra/mackup/pull/2085>)
-  added sync mode, which should be used instead.
-
-Link mode is used to move your config files into the Mackup folder,
-and link them back to their original place.
-
-This mode is useful if you are using multiple workstations,
-and want to keep your application settings in sync at all times.
-
-- Backs up your application settings in a safe directory (e.g. Dropbox)
-- Syncs your application settings among all your workstations
-- Restores your configuration on any fresh install in one command line
-
-Let's take `git` as an example. Your settings for `git` are saved in your home
-folder, in the `.gitconfig` file.
-
-It is covered by the 3 commands:
-
-- `mackup link install`
-- `mackup link`
-- `mackup link uninstall`
-
-#### `mackup link install`
-
-If you have Dropbox, these things happen when you launch `mackup link install`:
-
-1. `cp ~/.gitconfig ~/Dropbox/Mackup/.gitconfig`
-2. `rm ~/.gitconfig`
-3. `ln -s ~/Dropbox/Mackup/.gitconfig ~/.gitconfig`
-
-Now your `git` config is always backed up and up to date on all your workstations.
-
-#### `mackup link`
-
-When you launch `mackup link`, here's what it's really doing:
-
-1. `ln -s ~/Dropbox/Mackup/.gitconfig ~/.gitconfig`
-
-That's it, you got your `git` config setup on your new workstation.
-
-`mackup` does the same for any supported application.
-
-#### `mackup link uninstall`
-
-You can revert all your files to their original state.
-
-```bash
-# Just run this
-mackup link uninstall
-```
-
-This will remove the symlinks and copy back the files from the Mackup folder in
-Dropbox to their original places in your home. The Mackup folder and the files
-in it stay put, so that any other computer also running Mackup is unaffected.
 
 ## Supported Storages
 

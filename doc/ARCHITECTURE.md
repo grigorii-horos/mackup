@@ -15,9 +15,9 @@ iCloud) or any file system location.
 
 ### Operation Modes
 
-Mackup has two main operation modes:
+Mackup has one main operation mode:
 
-#### 1. Sync Mode (Recommended)
+#### Sync Mode
 
 Sync mode is used for synchronizing files:
 
@@ -27,21 +27,6 @@ Sync mode is used for synchronizing files:
   the Mackup folder, and records the deletion for other machines
 
 This is used when setting up a new machine and for ongoing synchronization.
-
-#### 2. Link Mode (Legacy - Not recommended for macOS Sonoma+)
-
-Link mode creates persistent symlinks between your home directory and the
-Mackup folder:
-
-- **`mackup link install`**: Moves files to Mackup folder and creates
-  symlinks back to original locations
-- **`mackup link`**: Creates symlinks from Mackup folder to home directory
-  (on additional machines)
-- **`mackup link uninstall`**: Removes symlinks and copies files back to
-  original locations
-
-⚠️ **Warning**: Link mode is broken on macOS Sonoma (14) and later due to
-changes in how macOS handles symlinked preferences. Use sync mode instead.
 
 ## Component Architecture
 
@@ -98,20 +83,18 @@ app/config
 
 ### 4. Application Handler (`application.py`)
 
-Handles sync, removal, and link operations for individual applications.
+Handles sync and removal operations for individual applications.
 
 **Key Operations:**
 
 - File discovery and validation
 - Copy operations with permission preservation
-- Symlink creation and management
 - XDG directory handling
 - Conflict detection
 
 ### 5. Core Engine (`mackup.py`)
 
-Orchestrates the overall sync, removal, and link operations across all
-applications.
+Orchestrates the overall sync and removal operations across all applications.
 
 **Workflow:**
 
@@ -126,7 +109,7 @@ applications.
 
 Common utility functions used throughout the codebase:
 
-- File system operations (copy, delete, symlink)
+- File system operations (copy, delete)
 - Path manipulation and resolution
 - XDG directory detection
 - Error handling and user prompts
@@ -175,40 +158,10 @@ application.py for each app:
 Future syncs remove the same path on other machines
 ```
 
-### Link Install Flow (Legacy)
-
-```text
-User runs: mackup link install
-    ↓
-main.py parses command
-    ↓
-config.py loads .mackup.cfg
-    ↓
-appsdb.py loads application definitions
-    ↓
-mackup.py iterates through applications
-    ↓
-application.py for each app:
-    - Moves config files to Mackup storage folder
-    - Creates symlinks from original location to storage
-    ↓
-Files in storage: ~/Dropbox/Mackup/
-Symlinks in home: ~/.config → ~/Dropbox/Mackup/.config
-```
-
 ## Key Design Decisions
 
-### 1. Symlinks vs Copies
+### 1. Sync Mode
 
-**Original Design (Link Mode):**
-
-- Symlinks allowed real-time sync across machines
-- Changes immediately reflected in cloud storage
-- Single source of truth
-
-**Current Recommendation (Sync Mode):**
-
-- macOS Sonoma+ broke symlink support for preferences
 - Sync mode is more reliable across platforms
 - Explicit removals are propagated with `mackup rm <path>`
 

@@ -150,6 +150,51 @@ class TestCLI(unittest.TestCase):
         with open(deletions_file) as f:
             assert f.read().splitlines() == [self.test_file_name]
 
+    def test_rm_deletes_multiple_paths_from_current_directory(self):
+        """Test rm accepts multiple paths relative to the current directory."""
+        nested_dir = os.path.join(self.test_home, ".ssh")
+        os.makedirs(nested_dir, exist_ok=True)
+        first_name = "config.bak.codex-20260430"
+        second_name = "config.d"
+        first_path = os.path.join(nested_dir, first_name)
+        second_path = os.path.join(nested_dir, second_name)
+        with open(first_path, "w") as f:
+            f.write("first\n")
+        os.makedirs(second_path, exist_ok=True)
+        with open(os.path.join(second_path, "host"), "w") as f:
+            f.write("second\n")
+
+        with open(self.custom_app_config, "w") as f:
+            f.write("[application]\n")
+            f.write(f"name = {self.test_app_name}\n")
+            f.write("\n")
+            f.write("[configuration_files]\n")
+            f.write(f".ssh/{first_name}\n")
+            f.write(f".ssh/{second_name}\n")
+
+        with patch("sys.argv", ["mackup", "sync"]):
+            main()
+
+        original_cwd = os.getcwd()
+        os.chdir(nested_dir)
+        try:
+            with patch("sys.argv", ["mackup", "rm", first_name, second_name]):
+                main()
+        finally:
+            os.chdir(original_cwd)
+
+        assert not os.path.exists(first_path)
+        assert not os.path.exists(second_path)
+        assert not os.path.exists(os.path.join(self.mackup_folder, ".ssh", first_name))
+        assert not os.path.exists(os.path.join(self.mackup_folder, ".ssh", second_name))
+
+        deletions_file = os.path.join(self.mackup_folder, ".mackup-deletions")
+        with open(deletions_file) as f:
+            assert f.read().splitlines() == [
+                f".ssh/{first_name}",
+                f".ssh/{second_name}",
+            ]
+
     def test_sync_applies_deletion_tombstone(self):
         """Test sync deletes files listed in the backup-side deletion log."""
         os.makedirs(self.mackup_folder, exist_ok=True)

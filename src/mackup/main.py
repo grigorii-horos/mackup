@@ -7,10 +7,7 @@ Usage:
   mackup [options] list
   mackup [options] show <application>
   mackup [options] sync
-  mackup [options] rm <path>
-  mackup [options] link install
-  mackup [options] link
-  mackup [options] link uninstall
+  mackup [options] rm <path>...
   mackup (-h | --help)
 
 Options:
@@ -28,9 +25,6 @@ Modes of action:
  - mackup show: display the details for a supported application.
  - mackup sync: synchronize local and remote config files in both directions.
  - mackup rm: remove a managed config file locally and from the remote folder.
- - mackup link install: moves local config files in remote folder, and links.
- - mackup link: links local config files from the remote folder.
- - mackup link uninstall: removes the links and copy config files locally.
 
 By default, Mackup syncs all application data via
 Dropbox, but may be configured to exclude applications or use a different
@@ -40,6 +34,7 @@ See https://github.com/lra/mackup/tree/master/doc for more information.
 
 """
 
+import os
 import sys
 from typing import Any, Optional
 
@@ -48,7 +43,7 @@ from docopt import docopt
 from . import utils
 from .application import ApplicationProfile
 from .appsdb import ApplicationsDatabase
-from .constants import MACKUP_APP_NAME, VERSION
+from .constants import VERSION
 from .mackup import Mackup
 
 
@@ -75,15 +70,9 @@ def get_action_label(stats: dict[str, int]) -> Optional[str]:
     restored = stats.get("restored", 0)
     synchronized = stats.get("synchronized", 0)
     deleted = stats.get("deleted", 0)
-    linked = stats.get("linked", 0)
-    reverted = stats.get("reverted", 0)
     errors = stats.get("errors", 0)
     if errors > 0:
         return "Failed"
-    if reverted > 0:
-        return "Reverted"
-    if linked > 0:
-        return "Linked"
     if deleted > 0:
         return "Deleted"
     if backed_up > 0 and restored > 0:
@@ -128,6 +117,21 @@ def main() -> None:
         if action is None:
             return
         print(utils.colorize_message(f"{action} {pretty_name}"))
+
+    def get_requested_path_candidates(path: str) -> list[str]:
+        candidates = [ApplicationProfile.normalize_relative_path(path)]
+        if not os.path.isabs(os.path.expanduser(path)):
+            absolute_path = os.path.abspath(path)
+            home = os.path.abspath(os.environ["HOME"])
+            try:
+                candidates.append(
+                    ApplicationProfile.normalize_relative_path(
+                        os.path.relpath(absolute_path, home),
+                    ),
+                )
+            except ValueError:
+                pass
+        return list(dict.fromkeys(candidates))
 
     # If we want to answer mackup with "yes" for each question
     if args["--force"]:
@@ -185,140 +189,58 @@ def main() -> None:
             stats = app.sync_files()
             print_app_result(stats, app_name, pretty_name)
 
-    # mackup rm <path>
+    # mackup rm <path>...
     elif args["rm"]:
         mckp.check_for_usable_backup_env()
 
-        requested_path = ApplicationProfile.normalize_relative_path(args["<path>"])
-        if (
-            requested_path == ".."
-            or requested_path.startswith("../")
-            or requested_path.startswith("..\\")
-            or requested_path.startswith("/")
-        ):
-            sys.exit(f"Refusing to remove unmanaged path: {args['<path>']}")
-
-        matching_app_name: Optional[str] = None
-        matching_mapping: Optional[tuple[str, str]] = None
+        managed_paths: dict[str, tuple[str, tuple[str, str]]] = {}
         for app_name in sorted(mckp.get_apps_to_backup()):
             for local_filename, backup_filename in sorted(
                 app_db.get_file_mappings(app_name),
             ):
-                if (
-                    ApplicationProfile.normalize_relative_path(local_filename)
-                    == requested_path
-                ):
-                    matching_app_name = app_name
-                    matching_mapping = (local_filename, backup_filename)
-                    break
-            if matching_mapping is not None:
-                break
-
-        if matching_app_name is None or matching_mapping is None:
-            sys.exit(f"Unsupported or unmanaged path: {args['<path>']}")
-
-        pretty_name = app_db.get_name(matching_app_name)
-        app = ApplicationProfile(mckp, {matching_mapping}, dry_run, verbose)
-        print_app_header(matching_app_name, pretty_name)
-        stats = app.remove_file(*matching_mapping)
-        print_app_result(stats, matching_app_name, pretty_name)
-
-    # mackup link install
-    elif args["link"] and args["install"]:
-        # Check the env where the command is being run
-        mckp.check_for_usable_backup_env()
-
-        # Create a link for each application
-        for app_name in sorted(mckp.get_apps_to_backup()):
-            pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
-            print_app_header(app_name, pretty_name)
-            stats = app.link_install()
-            print_app_result(stats, app_name, pretty_name)
-
-    # mackup link uninstall
-    elif args["link"] and args["uninstall"]:
-        # Check the env where the command is being run
-        mckp.check_for_usable_restore_env()
-
-        if dry_run or (
-            utils.confirm(
-                "You are going to uninstall Mackup.\n"
-                "Every configuration file, setting and dotfile"
-                " managed by Mackup will be unlinked and copied back"
-                " to their original place, in your home folder.\n"
-                "Are you sure?",
-            )
-        ):
-            # Uninstall the apps except Mackup, which we'll uninstall last, to
-            # keep the settings as long as possible
-            app_names = mckp.get_apps_to_backup()
-            app_names.discard(MACKUP_APP_NAME)
-
-            for app_name in sorted(app_names):
-                pretty_name = app_db.get_name(app_name)
-                app = ApplicationProfile(
-                    mckp, app_db.get_file_mappings(app_name), dry_run, verbose,
+                managed_paths.setdefault(
+                    ApplicationProfile.normalize_relative_path(local_filename),
+                    (app_name, (local_filename, backup_filename)),
                 )
-                print_app_header(app_name, pretty_name)
-                stats = app.link_uninstall()
-                print_app_result(stats, app_name, pretty_name)
- 
 
-            # Restore the Mackup config before any other config, as we might
-            # need it to know about custom settings
-            mackup_app = ApplicationProfile(
-                mckp, app_db.get_file_mappings(MACKUP_APP_NAME), dry_run, verbose,
+        stats_by_app: dict[str, dict[str, int]] = {}
+        for requested_arg in args["<path>"]:
+            requested_paths = get_requested_path_candidates(requested_arg)
+            if any(
+                path == ".."
+                or path.startswith("../")
+                or path.startswith("..\\")
+                or path.startswith("/")
+                for path in requested_paths
+            ):
+                sys.exit(f"Refusing to remove unmanaged path: {requested_arg}")
+
+            match = next(
+                (
+                    managed_paths[path]
+                    for path in requested_paths
+                    if path in managed_paths
+                ),
+                None,
             )
-            pretty_name = app_db.get_name(MACKUP_APP_NAME)
-            print_app_header(MACKUP_APP_NAME, pretty_name)
-            stats = mackup_app.link_uninstall()
-            print_app_result(stats, MACKUP_APP_NAME, pretty_name)
+            if match is None:
+                sys.exit(f"Unsupported or unmanaged path: {requested_arg}")
 
-            # Delete the Mackup folder in Dropbox
-            # Don't delete this as there might be other Macs that aren't
-            # uninstalled yet
-            # delete(mckp.mackup_folder)
+            matching_app_name, matching_mapping = match
+            pretty_name = app_db.get_name(matching_app_name)
+            app = ApplicationProfile(mckp, {matching_mapping}, dry_run, verbose)
+            print_app_header(matching_app_name, pretty_name)
+            app_stats = app.remove_file(*matching_mapping)
 
-            print(
-                "\n"
-                "All your files have been put back into place. You can now"
-                " safely uninstall Mackup.\n"
-                "\n"
-                "Thanks for using Mackup!",
+            app_stats_total = stats_by_app.setdefault(
+                matching_app_name,
+                {key: 0 for key in app_stats},
             )
+            for key, value in app_stats.items():
+                app_stats_total[key] = app_stats_total.get(key, 0) + value
 
-    # mackup link
-    elif args["link"]:
-        # Check the env where the command is being run
-        mckp.check_for_usable_restore_env()
-
-        # Restore the Mackup config before any other config, as we might need
-        # it to know about custom settings
-        mackup_app = ApplicationProfile(
-            mckp, app_db.get_file_mappings(MACKUP_APP_NAME), dry_run, verbose,
-        )
-        mackup_pretty = app_db.get_name(MACKUP_APP_NAME)
-        print_app_header(MACKUP_APP_NAME, mackup_pretty)
-        stats = mackup_app.link()
-        print_app_result(stats, MACKUP_APP_NAME, mackup_pretty)
-
-        # Initialize again the apps db, as the Mackup config might have changed
-        # it
-        mckp = Mackup(config_file)
-        app_db = ApplicationsDatabase()
-
-        # Restore the rest of the app configs, using the restored Mackup config
-        app_names = mckp.get_apps_to_backup()
-        # Mackup has already been done
-        app_names.discard(MACKUP_APP_NAME)
-
-        for app_name in sorted(app_names):
-            pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
-            print_app_header(app_name, pretty_name)
-            stats = app.link()
-            print_app_result(stats, app_name, pretty_name)
+        for app_name, stats in sorted(stats_by_app.items()):
+            print_app_result(stats, app_name, app_db.get_name(app_name))
 
     # Delete the tmp folder
     mckp.clean_temp_folder()

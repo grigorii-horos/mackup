@@ -79,10 +79,6 @@ def colorize_message(message: str) -> str:
         ("Deleting", AnsiColor.YELLOW, False),
         ("Synchronized", AnsiColor.BLUE, False),
         ("Synchronizing", AnsiColor.BLUE, False),
-        ("Linked", AnsiColor.BLUE, False),
-        ("Linking", AnsiColor.BLUE, False),
-        ("Reverted", AnsiColor.YELLOW, False),
-        ("Reverting", AnsiColor.YELLOW, False),
         ("Skipped", AnsiColor.WHITE, False),
         ("Skipping", AnsiColor.WHITE, False),
         ("Doing nothing", AnsiColor.GRAY, False),
@@ -182,39 +178,6 @@ def copy(src: str, dst: str) -> None:
     # What the heck is this?
     else:
         raise ValueError(f"Unsupported file: {src}")
-
-
-def link(target: str, link_to: str) -> None:
-    """
-    Create a link to a target file or a folder.
-
-    For the sake of simplicity, both target and link_to must be absolute path and must
-    include the filename of the file or folder.
-    Also do not include any trailing slash.
-
-    e.g. link('/path/to/file', '/path/to/link')
-
-    But not: link('/path/to/file', 'path/to/')
-    or link('/path/to/folder/', '/path/to/link')
-
-    Args:
-        target (str): file or folder the link will point to
-        link_to (str): Link to create
-    """
-    assert isinstance(target, str)
-    assert os.path.exists(target)
-    assert isinstance(link_to, str)
-
-    # Create the path to the link if it does not exist
-    abs_path = os.path.dirname(os.path.abspath(link_to))
-    if not os.path.isdir(abs_path):
-        os.makedirs(abs_path)
-
-    # Remove immutable attributes so the link can be created
-    remove_immutable_attribute(target)
-
-    # Create the link to target
-    os.symlink(target, link_to)
 
 
 def chmod(target: str) -> None:
