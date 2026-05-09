@@ -75,6 +75,8 @@ def colorize_message(message: str) -> str:
         ("Backing up", AnsiColor.CYAN, False),
         ("Restored", AnsiColor.GREEN, False),
         ("Restoring", AnsiColor.GREEN, False),
+        ("Deleted", AnsiColor.YELLOW, False),
+        ("Deleting", AnsiColor.YELLOW, False),
         ("Synchronized", AnsiColor.BLUE, False),
         ("Synchronizing", AnsiColor.BLUE, False),
         ("Linked", AnsiColor.BLUE, False),

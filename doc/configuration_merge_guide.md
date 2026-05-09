@@ -37,7 +37,7 @@ You can get a list of supported apps by running `mackup list`.
 1. Save the file
 2. Run the following command:
 
-`mackup --dry-run --verbose backup`
+`mackup --dry-run --verbose sync`
 
 This command will let you see what mackup will do behind the scenes when it
 backs up your application's configuration files so you can readily see what
@@ -148,13 +148,9 @@ Now you are ready to use Mackup to push out the changes. You should have Mackup
 already installed and the `.mackup.cfg` file in place according to the
 instructions provided above. If not, do that before proceeding.
 
-Run the following command on the master machine:
+Run the following command on each machine:
 
-`mackup backup`
-
-On each of the other "slave" machines, run:
-
-`mackup restore`
+`mackup sync`
 
 If you used Method 1 in Step 2 above, you are done. You may discover
 that you didn't quite merge the files exactly the way you wanted but don't

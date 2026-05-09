@@ -11,6 +11,8 @@ from typing import Union
 from . import utils
 from .mackup import Mackup
 
+DELETIONS_FILENAME = ".mackup-deletions"
+
 
 class ApplicationProfile:
     """Instantiate this class with application specific data."""
@@ -69,13 +71,131 @@ class ApplicationProfile:
             os.path.join(self.mackup.mackup_folder, backup_filename or local_filename),
         )
 
+    def get_deletions_filepath(self) -> str:
+        """Return the backup-side file that records explicit removals."""
+        return os.path.join(self.mackup.mackup_folder, DELETIONS_FILENAME)
+
+    @staticmethod
+    def normalize_relative_path(path: str) -> str:
+        """Normalize a user/log path to a relative Mackup config path."""
+        normalized = os.path.normpath(os.path.expanduser(path))
+        home = os.path.abspath(os.environ["HOME"])
+        if os.path.isabs(normalized):
+            normalized_abs = os.path.abspath(normalized)
+            try:
+                normalized = os.path.relpath(normalized_abs, home)
+            except ValueError:
+                normalized = normalized_abs
+        while normalized.startswith(f".{os.sep}"):
+            normalized = normalized[2:]
+        return normalized
+
+    def read_deleted_files(self) -> set[str]:
+        """Read explicit deletion tombstones from backup storage."""
+        deletions_filepath = self.get_deletions_filepath()
+        if not os.path.exists(deletions_filepath):
+            return set()
+
+        deleted_files: set[str] = set()
+        with open(deletions_filepath, encoding="utf-8") as f:
+            for line in f:
+                path = line.strip()
+                if path:
+                    deleted_files.add(self.normalize_relative_path(path))
+        return deleted_files
+
+    def write_deleted_files(self, deleted_files: set[str]) -> None:
+        """Write explicit deletion tombstones to backup storage."""
+        deletions_filepath = self.get_deletions_filepath()
+        os.makedirs(os.path.dirname(deletions_filepath), exist_ok=True)
+        with open(deletions_filepath, "w", encoding="utf-8") as f:
+            for path in sorted(deleted_files):
+                f.write(f"{path}\n")
+
+    def record_deleted_file(self, local_filename: str) -> None:
+        """Persist an explicit deletion tombstone for a managed path."""
+        deleted_files = self.read_deleted_files()
+        deleted_files.add(self.normalize_relative_path(local_filename))
+        self.write_deleted_files(deleted_files)
+
+    def apply_deleted_files(self) -> dict[str, int]:
+        """Apply deletion tombstones for this app before normal sync."""
+        stats: dict[str, int] = {"deleted": 0, "errors": 0}
+        deleted_files = self.read_deleted_files()
+        if not deleted_files:
+            return stats
+
+        for local_filename, backup_filename in self.file_entries:
+            if self.normalize_relative_path(local_filename) not in deleted_files:
+                continue
+
+            home_filepath, mackup_filepath = self.get_filepaths(
+                local_filename, backup_filename,
+            )
+            deleted_any = False
+            for filepath in (home_filepath, mackup_filepath):
+                if not os.path.lexists(filepath):
+                    continue
+                if self.verbose:
+                    self._print(f"Deleting\n  {filepath} ...")
+                if self.dry_run:
+                    deleted_any = True
+                    continue
+                try:
+                    utils.delete(filepath)
+                    deleted_any = True
+                except PermissionError as e:
+                    self._print(
+                        f"Error: Unable to delete file {filepath} "
+                        f"due to permission issue: {e}",
+                    )
+                    stats["errors"] += 1
+            if deleted_any:
+                stats["deleted"] += 1
+
+        return stats
+
+    def remove_file(self, local_filename: str, backup_filename: str) -> dict[str, int]:
+        """Explicitly remove one managed file locally and from backup storage."""
+        stats: dict[str, int] = {"deleted": 0, "errors": 0}
+        home_filepath, mackup_filepath = self.get_filepaths(
+            local_filename, backup_filename,
+        )
+
+        if self.verbose:
+            self._print(
+                f"Deleting\n  {home_filepath}\n  and\n  {mackup_filepath} ...",
+            )
+
+        if self.dry_run:
+            stats["deleted"] += 1
+            return stats
+
+        for filepath in (home_filepath, mackup_filepath):
+            if not os.path.lexists(filepath):
+                continue
+            try:
+                utils.delete(filepath)
+            except PermissionError as e:
+                self._print(
+                    f"Error: Unable to delete file {filepath} "
+                    f"due to permission issue: {e}",
+                )
+                stats["errors"] += 1
+
+        if stats["errors"] == 0:
+            self.record_deleted_file(local_filename)
+            stats["deleted"] += 1
+
+        return stats
+
     @staticmethod
     def get_effective_mtime(path: str) -> float:
         """
         Return comparable mtime for a file or directory.
 
         For directories, the newest mtime in the whole tree is used so changes
-        to nested files/folders are considered during backup/restore/sync.
+        to nested files/folders are considered during sync.
         """
         latest_mtime = os.path.getmtime(path)
 
@@ -272,197 +392,21 @@ class ApplicationProfile:
 
         return changed
 
-    def copy_files_to_mackup_folder(self) -> dict[str, int]:
-        """
-        Backup the application config files to the Mackup folder.
-
-        Algorithm:
-            for config_file
-                if config_file exists and is a real file/folder
-                    if home/file is a symlink pointing to mackup/file
-                        skip (already backed up via link install)
-                    if exists mackup/file
-                        are you sure?
-                        if sure
-                            rm mackup/file
-                    cp home/file mackup/file
-        """
-        stats: dict[str, int] = {"backed_up": 0, "skipped": 0, "errors": 0}
-
-        for local_filename, backup_filename in self.file_entries:
-            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
-
-            # If config_file exists and is a real file/folder
-            if (os.path.isfile(home_filepath) or os.path.isdir(home_filepath)):
-                # Check if home file is a symlink pointing to mackup file
-                # (already backed up via link install)
-                if (
-                    os.path.islink(home_filepath)
-                    and os.path.exists(mackup_filepath)
-                    and os.path.samefile(home_filepath, mackup_filepath)
-                ):
-                    if self.verbose:
-                        self._print(
-                            f"Skipping {home_filepath}\n"
-                            f"  already linked to\n  {mackup_filepath}",
-                        )
-                    stats["skipped"] += 1
-                    continue
-
-                # If exists mackup/file
-                if os.path.lexists(mackup_filepath):
-                    if os.path.exists(mackup_filepath):
-                        if os.path.isdir(home_filepath) and os.path.isdir(mackup_filepath):
-                            changed = self.sync_directory_entries_one_way(
-                                home_filepath, mackup_filepath, source_wins=True,
-                                dry_run=self.dry_run,
-                            )
-                            if not changed:
-                                if self.verbose:
-                                    self._print(
-                                        f"Skipping {home_filepath}\n"
-                                        f"  backup is newer or same age at\n  {mackup_filepath}",
-                                    )
-                                stats["skipped"] += 1
-                            else:
-                                if self.verbose:
-                                    self._print(
-                                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
-                                    )
-                                stats["backed_up"] += 1
-                            continue
-
-                        source_mtime = self.get_effective_mtime(home_filepath)
-                        backup_mtime = self.get_effective_mtime(mackup_filepath)
-                        if source_mtime <= backup_mtime:
-                            if self.verbose:
-                                self._print(
-                                    f"Skipping {home_filepath}\n"
-                                    f"  backup is newer or same age at\n  {mackup_filepath}",
-                                )
-                            stats["skipped"] += 1
-                            continue
-
-                if self.verbose:
-                    self._print(
-                        f"Backing up\n  {home_filepath}\n  to\n  {mackup_filepath} ...",
-                    )
-
-                if self.dry_run:
-                    stats["backed_up"] += 1
-                    continue
-
-                if os.path.lexists(mackup_filepath):
-                    # Local file is newer (or backup is broken link), overwrite silently.
-                    utils.delete(mackup_filepath)
-
-                # Copy the file
-                try:
-                    utils.copy(home_filepath, mackup_filepath)
-                    stats["backed_up"] += 1
-                except PermissionError as e:
-                    self._print(
-                        f"Error: Unable to copy file from {home_filepath} to "
-                        f"{mackup_filepath} due to permission issue: {e}",
-                    )
-                    stats["errors"] += 1
-
-        return stats
-
-    def copy_files_from_mackup_folder(self) -> dict[str, int]:
-        """
-        Recover the application config files from the Mackup folder.
-
-        Algorithm:
-            for config_file
-                if config_file exists in mackup and is a real file/folder
-                    if exists home/file and mtime(home) >= mtime(mackup)
-                        skip
-                    if exists home/file and --force
-                        rm home/file
-                    cp mackup/file home/file
-        """
-        stats: dict[str, int] = {"restored": 0, "skipped": 0, "errors": 0}
-
-        for local_filename, backup_filename in self.file_entries:
-            (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
-
-            # If config_file exists in mackup and is a real file/folder
-            if (os.path.isfile(mackup_filepath) or os.path.isdir(mackup_filepath)):
-                # If local file is newer (or same age), keep local version by default.
-                if (
-                    os.path.exists(home_filepath)
-                    and not utils.FORCE_YES
-                    and os.path.isdir(home_filepath)
-                    and os.path.isdir(mackup_filepath)
-                ):
-                    changed = self.sync_directory_entries_one_way(
-                        mackup_filepath, home_filepath, source_wins=True,
-                        dry_run=self.dry_run,
-                    )
-                    if not changed:
-                        if self.verbose:
-                            self._print(
-                                f"Skipping {home_filepath}\n"
-                                f"  local file is newer or same age than\n  {mackup_filepath}",
-                            )
-                        stats["skipped"] += 1
-                    else:
-                        if self.verbose:
-                            self._print(
-                                f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
-                            )
-                        stats["restored"] += 1
-                    continue
-
-                if (
-                    os.path.exists(home_filepath)
-                    and not utils.FORCE_YES
-                    and self.get_effective_mtime(home_filepath)
-                    >= self.get_effective_mtime(mackup_filepath)
-                ):
-                    if self.verbose:
-                        self._print(
-                            f"Skipping {home_filepath}\n"
-                            f"  local file is newer or same age than\n  {mackup_filepath}",
-                        )
-                    stats["skipped"] += 1
-                    continue
-
-                if self.verbose:
-                    self._print(
-                        f"Restoring\n  {mackup_filepath}\n  to\n  {home_filepath} ...",
-                    )
-
-                if self.dry_run:
-                    stats["restored"] += 1
-                    continue
-
-                # If exists home/file, overwrite it.
-                if os.path.lexists(home_filepath):
-                    utils.delete(home_filepath)
-
-                # Copy the file
-                try:
-                    utils.copy(mackup_filepath, home_filepath)
-                    stats["restored"] += 1
-                except PermissionError as e:
-                    self._print(
-                        f"Error: Unable to copy file from {mackup_filepath} to "
-                        f"{home_filepath} due to permission issue: {e}",
-                    )
-                    stats["errors"] += 1
-
-        return stats
-
     def sync_files(self) -> dict[str, int]:
         """Synchronize files between home and Mackup using mtime."""
         stats: dict[str, int] = {
             "backed_up": 0, "restored": 0, "synchronized": 0,
-            "skipped": 0, "errors": 0,
+            "deleted": 0, "skipped": 0, "errors": 0,
         }
+        deletion_stats = self.apply_deleted_files()
+        stats["deleted"] += deletion_stats["deleted"]
+        stats["errors"] += deletion_stats["errors"]
+        deleted_files = self.read_deleted_files()
 
         for local_filename, backup_filename in self.file_entries:
+            if self.normalize_relative_path(local_filename) in deleted_files:
+                continue
+
             (home_filepath, mackup_filepath) = self.get_filepaths(local_filename, backup_filename)
 
             home_exists = os.path.isfile(home_filepath) or os.path.isdir(home_filepath)

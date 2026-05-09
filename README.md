@@ -16,7 +16,7 @@ Backup and keep your application settings in sync.
   - [Quickstart](#quickstart)
   - [Usage](#usage)
   - [What does it do](#what-does-it-do)
-    - [Copy mode](#copy-mode)
+    - [Sync mode](#sync-mode)
     - [Link mode](#link-mode)
       - [`mackup link install`](#mackup-link-install)
       - [`mackup link`](#mackup-link)
@@ -42,8 +42,8 @@ On macOS or Linux, if you want an easy install, you can install
 # Install Mackup
 brew install mackup
 
-# Launch it and back up your files
-mackup backup
+# Launch it and sync your files
+mackup sync
 ```
 
 If not running macOS or Linux, or you don't like Homebrew, you can use [pip](https://pip.pypa.io/en/stable/).
@@ -52,8 +52,8 @@ If not running macOS or Linux, or you don't like Homebrew, you can use [pip](htt
 # Install Mackup with PIP
 pip install --upgrade mackup
 
-# Launch it and back up your files
-mackup backup
+# Launch it and sync your files
+mackup sync
 ```
 
 You're all set and can back up from now on.
@@ -64,8 +64,8 @@ Next, on any new workstation, do:
 # Install Mackup
 brew install mackup
 
-# Launch it and restore your files
-mackup restore
+# Launch it and sync your files
+mackup sync
 ```
 
 Done!
@@ -74,14 +74,14 @@ You can find more detailed instructions in [INSTALL.md](INSTALL.md).
 
 ## Usage
 
-`mackup backup`
+`mackup sync`
 
-Back up your application files. Copy your local config files into the Mackup folder.
+Synchronize your application files between your home folder and the Mackup folder.
 
-`mackup restore`
+`mackup rm <path>`
 
-Restore your application settings on a newly installed workstation.
-Copy config files from the Mackup folder to your home folder.
+Remove a managed config path locally and from the Mackup folder, and record the
+deletion so future syncs remove it on other machines too.
 
 `mackup link install`
 
@@ -116,18 +116,18 @@ files are transferred).
 
 Mackup makes setting up the environment easy and simple.
 
-There are 2 modes of operations: copy mode and link mode.
+There are 2 modes of operations: sync mode and link mode.
 
-### Copy mode
+### Sync mode
 
-Copy mode is used to back up and restore your files.
-The files are backed up into the configured Mackup folder,
+Sync mode is used to synchronize your files.
+The files are stored in the configured Mackup folder,
 which can be in Dropbox, iCloud, or wherever you configure it.
 
-It is covered by the 2 commands:
+It is covered by the commands:
 
-- `mackup backup`
-- `mackup restore`
+- `mackup sync`
+- `mackup rm <path>`
 
 ### Link mode
 
@@ -136,7 +136,7 @@ It is covered by the 2 commands:
   YOUR PREFERENCES. macOS Sonoma (macOS 14) and later don't support symlinked
   preferences, see [issue #2035](https://github.com/lra/mackup/issues/2035) for
   additional information. [PR #2085](<https://github.com/lra/mackup/pull/2085>)
-  added copy mode, which should be used instead.
+  added sync mode, which should be used instead.
 
 Link mode is used to move your config files into the Mackup folder,
 and link them back to their original place.

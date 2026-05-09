@@ -28,7 +28,7 @@ You can also specify a custom config file location using the `--config-file`
 command-line option:
 
 ```bash
-mackup --config-file ~/.mackup-custom.cfg backup
+mackup --config-file ~/.mackup-custom.cfg sync
 ```
 
 The path can be absolute or relative to your home directory. Note that the
@@ -141,7 +141,7 @@ already setup (ex: from `dropbox` to `icloud`), complete the following steps.
 1. Run `mackup uninstall` on all computers
 2. Copy your Mackup files to the new storage location
 3. Change the storage provider details in your `.mackup.cfg` file (see above)
-4. Run `mackup backup` on the main computer and `mackup restore` on all others
+4. Run `mackup sync` on each computer
 
 ## Applications
 
@@ -275,7 +275,7 @@ Supported applications:
 All good, you can now sync your newly configured files:
 
 ```bash
-mackup backup
+mackup sync
 ```
 
 If you override an application config that is already supported by Mackup, your
@@ -292,7 +292,7 @@ You can add and test an application by following these steps:
 - add the appropriate application config file in the `mackup/applications` folder
 - from the top-most folder _(mackup)_ run `make develop` that replaces the
   currently installed mackup with the local modified one
-- simply run `mackup backup` to test if everything is ok
+- simply run `mackup sync` to test if everything is ok
 - if everything works as expected:
   - run `make undevelop` to revert to the official version
   - commit and push the change to your fork and then create the Pulls Request

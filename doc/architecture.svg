@@ -167,6 +167,6 @@
   
   <!-- Footer note -->
   <text x="600" y="870" class="small-text" text-anchor="middle" style="font-style: italic;">
-    Files are either copied (backup/restore) or symlinked (link mode) between your home and storage folder
+    Files are either synchronized or symlinked (link mode) between your home and storage folder
   </text>
 </svg>

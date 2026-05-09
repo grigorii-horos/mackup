@@ -103,7 +103,7 @@ class TestMackup(unittest.TestCase):
         utils.delete(dstpath)
 
     def test_copy_file_preserves_mtime(self):
-        """copy() preserves source mtime, so backup/restore mtime logic is stable."""
+        """copy() preserves source mtime, so sync mtime logic is stable."""
         # Create a source file
         tfile = tempfile.NamedTemporaryFile(delete=False)
         srcfile = tfile.name

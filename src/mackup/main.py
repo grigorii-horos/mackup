@@ -6,9 +6,8 @@ Copyright (C) 2013-2025 Laurent Raufaste <http://glop.org/>
 Usage:
   mackup [options] list
   mackup [options] show <application>
-  mackup [options] backup
-  mackup [options] restore
   mackup [options] sync
+  mackup [options] rm <path>
   mackup [options] link install
   mackup [options] link
   mackup [options] link uninstall
@@ -27,9 +26,8 @@ Options:
 Modes of action:
  - mackup list: display a list of all supported applications.
  - mackup show: display the details for a supported application.
- - mackup backup: copy local config files in the configured remote folder.
- - mackup restore: copy config files from the configured remote folder locally.
  - mackup sync: synchronize local and remote config files in both directions.
+ - mackup rm: remove a managed config file locally and from the remote folder.
  - mackup link install: moves local config files in remote folder, and links.
  - mackup link: links local config files from the remote folder.
  - mackup link uninstall: removes the links and copy config files locally.
@@ -76,6 +74,7 @@ def get_action_label(stats: dict[str, int]) -> Optional[str]:
     backed_up = stats.get("backed_up", 0)
     restored = stats.get("restored", 0)
     synchronized = stats.get("synchronized", 0)
+    deleted = stats.get("deleted", 0)
     linked = stats.get("linked", 0)
     reverted = stats.get("reverted", 0)
     errors = stats.get("errors", 0)
@@ -85,6 +84,8 @@ def get_action_label(stats: dict[str, int]) -> Optional[str]:
         return "Reverted"
     if linked > 0:
         return "Linked"
+    if deleted > 0:
+        return "Deleted"
     if backed_up > 0 and restored > 0:
         return "Synchronized"
     if backed_up > 0:
@@ -171,32 +172,6 @@ def main() -> None:
         for file in app_db.get_files(requested_app_name):
             print(f" - {file}")
 
-    # mackup backup
-    elif args["backup"]:
-        mckp.check_for_usable_backup_env()
-
-        # Create a backup of the files of each application
-        for app_name in sorted(mckp.get_apps_to_backup()):
-            pretty_name = app_db.get_name(app_name)
-            app: ApplicationProfile = ApplicationProfile(
-                mckp, app_db.get_file_mappings(app_name), dry_run, verbose,
-            )
-            print_app_header(app_name, pretty_name)
-            stats = app.copy_files_to_mackup_folder()
-            print_app_result(stats, app_name, pretty_name)
-
-    # mackup restore
-    elif args["restore"]:
-        mckp.check_for_usable_restore_env()
-
-        # Recover a backup of the files of each application
-        for app_name in sorted(mckp.get_apps_to_backup()):
-            pretty_name = app_db.get_name(app_name)
-            app = ApplicationProfile(mckp, app_db.get_file_mappings(app_name), dry_run, verbose)
-            print_app_header(app_name, pretty_name)
-            stats = app.copy_files_from_mackup_folder()
-            print_app_result(stats, app_name, pretty_name)
-
     # mackup sync
     elif args["sync"]:
         mckp.check_for_usable_backup_env()
@@ -209,6 +184,44 @@ def main() -> None:
             print_app_header(app_name, pretty_name)
             stats = app.sync_files()
             print_app_result(stats, app_name, pretty_name)
+
+    # mackup rm <path>
+    elif args["rm"]:
+        mckp.check_for_usable_backup_env()
+
+        requested_path = ApplicationProfile.normalize_relative_path(args["<path>"])
+        if (
+            requested_path == ".."
+            or requested_path.startswith("../")
+            or requested_path.startswith("..\\")
+            or requested_path.startswith("/")
+        ):
+            sys.exit(f"Refusing to remove unmanaged path: {args['<path>']}")
+
+        matching_app_name: Optional[str] = None
+        matching_mapping: Optional[tuple[str, str]] = None
+        for app_name in sorted(mckp.get_apps_to_backup()):
+            for local_filename, backup_filename in sorted(
+                app_db.get_file_mappings(app_name),
+            ):
+                if (
+                    ApplicationProfile.normalize_relative_path(local_filename)
+                    == requested_path
+                ):
+                    matching_app_name = app_name
+                    matching_mapping = (local_filename, backup_filename)
+                    break
+            if matching_mapping is not None:
+                break
+
+        if matching_app_name is None or matching_mapping is None:
+            sys.exit(f"Unsupported or unmanaged path: {args['<path>']}")
+
+        pretty_name = app_db.get_name(matching_app_name)
+        app = ApplicationProfile(mckp, {matching_mapping}, dry_run, verbose)
+        print_app_header(matching_app_name, pretty_name)
+        stats = app.remove_file(*matching_mapping)
+        print_app_result(stats, matching_app_name, pretty_name)
 
     # mackup link install
     elif args["link"] and args["install"]:

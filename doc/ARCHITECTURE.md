@@ -17,17 +17,16 @@ iCloud) or any file system location.
 
 Mackup has two main operation modes:
 
-#### 1. Copy Mode (Recommended)
+#### 1. Sync Mode (Recommended)
 
-Copy mode is used for backing up and restoring files:
+Sync mode is used for synchronizing files:
 
-- **`mackup backup`**: Copies configuration files from your home directory
-  to the Mackup folder
-- **`mackup restore`**: Copies configuration files from the Mackup folder
-  back to your home directory
+- **`mackup sync`**: Synchronizes configuration files between your home
+  directory and the Mackup folder
+- **`mackup rm <path>`**: Removes a managed configuration path locally and from
+  the Mackup folder, and records the deletion for other machines
 
-This is a one-time operation used when setting up a new machine or creating
-an initial backup.
+This is used when setting up a new machine and for ongoing synchronization.
 
 #### 2. Link Mode (Legacy - Not recommended for macOS Sonoma+)
 
@@ -42,7 +41,7 @@ Mackup folder:
   original locations
 
 ⚠️ **Warning**: Link mode is broken on macOS Sonoma (14) and later due to
-changes in how macOS handles symlinked preferences. Use copy mode instead.
+changes in how macOS handles symlinked preferences. Use sync mode instead.
 
 ## Component Architecture
 
@@ -99,7 +98,7 @@ app/config
 
 ### 4. Application Handler (`application.py`)
 
-Handles the operations (backup, restore, link) for individual applications.
+Handles sync, removal, and link operations for individual applications.
 
 **Key Operations:**
 
@@ -111,7 +110,7 @@ Handles the operations (backup, restore, link) for individual applications.
 
 ### 5. Core Engine (`mackup.py`)
 
-Orchestrates the overall backup/restore/link operations across all
+Orchestrates the overall sync, removal, and link operations across all
 applications.
 
 **Workflow:**
@@ -135,10 +134,10 @@ Common utility functions used throughout the codebase:
 
 ## Data Flow
 
-### Backup Flow
+### Sync Flow
 
 ```text
-User runs: mackup backup
+User runs: mackup sync
     ↓
 main.py parses command
     ↓
@@ -149,17 +148,17 @@ appsdb.py loads application definitions
 mackup.py iterates through applications
     ↓
 application.py for each app:
-    - Finds config files in home directory
-    - Copies to Mackup storage folder
+    - Compares config files in home and Mackup storage
+    - Copies the newer side to the older side
     - Preserves permissions and timestamps
     ↓
 Files now in: ~/Dropbox/Mackup/ (or chosen storage)
 ```
 
-### Restore Flow
+### Remove Flow
 
 ```text
-User runs: mackup restore
+User runs: mackup rm <path>
     ↓
 main.py parses command
     ↓
@@ -170,11 +169,10 @@ appsdb.py loads application definitions
 mackup.py iterates through applications
     ↓
 application.py for each app:
-    - Finds files in Mackup storage folder
-    - Copies to home directory
-    - Preserves permissions and timestamps
+    - Deletes the managed path in home and Mackup storage
+    - Records the path in .mackup-deletions
     ↓
-Config files now in home directory
+Future syncs remove the same path on other machines
 ```
 
 ### Link Install Flow (Legacy)
@@ -208,11 +206,11 @@ Symlinks in home: ~/.config → ~/Dropbox/Mackup/.config
 - Changes immediately reflected in cloud storage
 - Single source of truth
 
-**Current Recommendation (Copy Mode):**
+**Current Recommendation (Sync Mode):**
 
 - macOS Sonoma+ broke symlink support for preferences
-- Copy mode is more reliable across platforms
-- Trade-off: manual sync required (re-run backup/restore)
+- Sync mode is more reliable across platforms
+- Explicit removals are propagated with `mackup rm <path>`
 
 ### 2. Application Database
 

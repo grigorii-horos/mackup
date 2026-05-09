@@ -11,7 +11,7 @@ from mackup.main import main
 
 
 class TestCLI(unittest.TestCase):
-    """Test suite for CLI commands: backup, restore, and copy mode workflows."""
+    """Test suite for CLI sync and removal workflows."""
 
     def setUp(self):
         """Set up test environment before each test."""
@@ -90,136 +90,10 @@ class TestCLI(unittest.TestCase):
         utils.FORCE_NO = False
         utils.CAN_RUN_AS_ROOT = False
 
-    def test_backup_creates_mackup_folder(self):
-        """Test that mackup backup creates the Mackup folder if it doesn't exist."""
-        # Ensure Mackup folder doesn't exist
-        assert not os.path.exists(self.mackup_folder)
-
-        # Mock sys.argv to simulate 'mackup backup'
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Check that Mackup folder was created
-        assert os.path.exists(self.mackup_folder)
-
-    def test_backup_copies_file(self):
-        """Test that mackup backup successfully copies a file to the backup location."""
-        # Ensure test file exists
-        assert os.path.exists(self.test_file_path)
-
-        # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Check that file was copied to Mackup folder
-        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
-        assert os.path.exists(backed_up_file)
-
-        # Verify content is the same
-        with open(self.test_file_path) as f:
-            original_content = f.read()
-        with open(backed_up_file) as f:
-            backed_up_content = f.read()
-
-        assert original_content == backed_up_content
-
-    def test_restore_copies_file_back(self):
-        """Test that mackup restore successfully copies a file back from backup."""
-        # First, create a backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Verify backup exists
-        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
-        assert os.path.exists(backed_up_file)
-
-        # Remove original file
-        os.remove(self.test_file_path)
-        assert not os.path.exists(self.test_file_path)
-
-        # Run restore
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
-
-        # Check that file was restored
-        assert os.path.exists(self.test_file_path)
-
-        # Verify content is correct
-        with open(self.test_file_path) as f:
-            restored_content = f.read()
-
-        assert restored_content == "test_config=value\n"
-
-    def test_restore_skips_when_local_is_newer(self):
-        """Test restore keeps local file when local mtime is newer."""
-        original_content = "test_config=value\n"
-
-        # Verify original file exists and has correct content
-        assert os.path.exists(self.test_file_path)
-        with open(self.test_file_path) as f:
-            assert f.read() == original_content
-
-        # Step 1: Backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Verify backup was created
-        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
-        assert os.path.exists(backed_up_file)
-
-        # Step 2: Modify original file
-        modified_content = "test_config=modified\n"
-        with open(self.test_file_path, "w") as f:
-            f.write(modified_content)
-
-        # Verify file was modified
-        with open(self.test_file_path) as f:
-            assert f.read() == modified_content
-
-        # Step 3: Restore without force (should keep modified local file)
-        utils.FORCE_YES = False
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
-
-        # Verify file is still local modified content
-        with open(self.test_file_path) as f:
-            assert f.read() == modified_content
-
-        # Cleanup flag for remaining tests
-        utils.FORCE_YES = True
-
-    def test_restore_force_overwrites_when_local_is_newer(self):
-        """Test restore --force replaces local file even if local mtime is newer."""
-        original_content = "test_config=value\n"
-
-        # Step 1: Backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Step 2: Modify original file (now newer than backup)
-        modified_content = "test_config=modified\n"
-        with open(self.test_file_path, "w") as f:
-            f.write(modified_content)
-
-        with open(self.test_file_path) as f:
-            assert f.read() == modified_content
-
-        # Step 3: Force restore (must overwrite local file)
-        with patch("sys.argv", ["mackup", "--force", "restore"]):
-            main()
-
-        # Verify file was restored to original content
-        with open(self.test_file_path) as f:
-            assert f.read() == original_content
-
     def test_sync_updates_local_when_backup_is_newer(self):
         """Test sync restores local file when backup is newer."""
-        # Create initial backup
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
+        os.makedirs(self.mackup_folder, exist_ok=True)
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
-        assert os.path.exists(backed_up_file)
 
         # Make backup newer and different
         with open(backed_up_file, "w") as f:
@@ -237,8 +111,7 @@ class TestCLI(unittest.TestCase):
 
     def test_sync_updates_backup_when_local_is_newer(self):
         """Test sync backs up local file when local file is newer."""
-        # Create initial backup
-        with patch("sys.argv", ["mackup", "backup"]):
+        with patch("sys.argv", ["mackup", "sync"]):
             main()
 
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
@@ -258,43 +131,45 @@ class TestCLI(unittest.TestCase):
         with open(backed_up_file) as f:
             assert f.read() == "local_newer_value\n"
 
-    def test_backup_preserves_file_permissions(self):
-        """Test that mackup backup preserves file permissions."""
-        # Set specific permissions on test file
-        os.chmod(self.test_file_path, 0o600)
-
-        # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
+    def test_rm_deletes_local_and_backup_and_records_tombstone(self):
+        """Test rm deletes a managed path and records it in backup storage."""
+        with patch("sys.argv", ["mackup", "sync"]):
             main()
 
-        # Check backup file permissions
         backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
+        assert os.path.exists(self.test_file_path)
         assert os.path.exists(backed_up_file)
 
-        # Verify permissions are preserved (mackup sets to 0600 by default)
-        backed_up_stat = os.stat(backed_up_file)
-        expected_mode = 0o600
-        assert backed_up_stat.st_mode & 0o777 == expected_mode
+        with patch("sys.argv", ["mackup", "rm", self.test_file_name]):
+            main()
 
-    def test_restore_with_missing_backup(self):
-        """Test that mackup restore handles missing backup files gracefully."""
-        # Ensure no backup exists
-        assert not os.path.exists(self.mackup_folder)
+        assert not os.path.exists(self.test_file_path)
+        assert not os.path.exists(backed_up_file)
 
-        # Create the mackup folder but don't add any files
+        deletions_file = os.path.join(self.mackup_folder, ".mackup-deletions")
+        with open(deletions_file) as f:
+            assert f.read().splitlines() == [self.test_file_name]
+
+    def test_sync_applies_deletion_tombstone(self):
+        """Test sync deletes files listed in the backup-side deletion log."""
         os.makedirs(self.mackup_folder, exist_ok=True)
+        backed_up_file = os.path.join(self.mackup_folder, self.test_file_name)
+        with open(backed_up_file, "w") as f:
+            f.write("backup_config=value\n")
+        with open(os.path.join(self.mackup_folder, ".mackup-deletions"), "w") as f:
+            f.write(f"{self.test_file_name}\n")
 
-        # Run restore (should not crash even though no backup exists)
-        with patch("sys.argv", ["mackup", "restore"]):
-            try:
-                main()
-                # If no exception is raised, the test passes
-                # (restore should gracefully handle missing files)
-            except Exception as e:
-                self.fail(f"Restore raised an exception with missing backup: {e}")
+        assert os.path.exists(self.test_file_path)
+        assert os.path.exists(backed_up_file)
 
-    def test_backup_with_folder(self):
-        """Test that mackup backup works with folders, not just files."""
+        with patch("sys.argv", ["mackup", "sync"]):
+            main()
+
+        assert not os.path.exists(self.test_file_path)
+        assert not os.path.exists(backed_up_file)
+
+    def test_sync_with_folder(self):
+        """Test that mackup sync works with folders, not just files."""
         # Create a test folder with a file inside
         test_folder_name = ".test_folder"
         test_folder_path = os.path.join(self.test_home, test_folder_name)
@@ -313,8 +188,8 @@ class TestCLI(unittest.TestCase):
             f.write(f"{self.test_file_name}\n")
             f.write(f"{test_folder_name}\n")
 
-        # Run backup
-        with patch("sys.argv", ["mackup", "backup"]):
+        # Run sync
+        with patch("sys.argv", ["mackup", "sync"]):
             main()
 
         # Check that folder was copied
@@ -330,65 +205,9 @@ class TestCLI(unittest.TestCase):
         with open(backed_up_file_in_folder) as f:
             assert f.read() == "folder_config=value\n"
 
-    def test_restore_with_folder(self):
-        """Test that mackup restore works with folders."""
-        # Create a test folder with a file inside
-        test_folder_name = ".test_folder"
-        test_folder_path = os.path.join(self.test_home, test_folder_name)
-        os.makedirs(test_folder_path, exist_ok=True)
-
-        test_file_in_folder = os.path.join(test_folder_path, "config.txt")
-        with open(test_file_in_folder, "w") as f:
-            f.write("folder_config=value\n")
-
-        # Update custom app config to include the folder
-        with open(self.custom_app_config, "w") as f:
-            f.write("[application]\n")
-            f.write(f"name = {self.test_app_name}\n")
-            f.write("\n")
-            f.write("[configuration_files]\n")
-            f.write(f"{self.test_file_name}\n")
-            f.write(f"{test_folder_name}\n")
-
-        # Run backup first
-        with patch("sys.argv", ["mackup", "backup"]):
-            main()
-
-        # Delete the folder
-        shutil.rmtree(test_folder_path)
-        assert not os.path.exists(test_folder_path)
-
-        # Run restore
-        with patch("sys.argv", ["mackup", "restore"]):
-            main()
-
-        # Check that folder was restored
-        assert os.path.exists(test_folder_path)
-        assert os.path.isdir(test_folder_path)
-
-        # Check that file inside folder was restored
-        assert os.path.exists(test_file_in_folder)
-
-        # Verify content
-        with open(test_file_in_folder) as f:
-            assert f.read() == "folder_config=value\n"
-
-    def test_restore_fails_when_mackup_folder_missing(self):
-        """Test that mackup restore fails when Mackup folder doesn't exist."""
-        # Ensure Mackup folder doesn't exist
-        assert not os.path.exists(self.mackup_folder)
-
-        # Run restore - should exit with error when backup folder is missing
-        with patch("sys.argv", ["mackup", "restore"]):
-            with pytest.raises(SystemExit) as context:
-                main()
-
-            # Should exit with non-zero status
-            assert context.value.code != 0
-
     def test_force_and_force_no_are_mutually_exclusive(self):
         """Passing --force and --force-no together should fail fast."""
-        with patch("sys.argv", ["mackup", "--force", "--force-no", "backup"]):
+        with patch("sys.argv", ["mackup", "--force", "--force-no", "sync"]):
             with pytest.raises(SystemExit) as context:
                 main()
 
